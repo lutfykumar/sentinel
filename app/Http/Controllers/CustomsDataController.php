@@ -11,6 +11,362 @@ use Inertia\Inertia;
 class CustomsDataController extends Controller
 {
     /**
+     * Apply generic field operator for relationship queries.
+     */
+    private function applyGenericFieldOperator($query, $field, $operator, $value, $textFields = [], $numericFields = [])
+    {
+        // Cast numeric values for numeric fields
+        if (in_array($field, $numericFields) && is_string($value) && is_numeric($value)) {
+            $value = (float) $value;
+            \Log::info("QUERY_DEBUG: Field '{$field}' < operator '{$operator}' < value {$value} (converted from string)");
+        } else {
+            \Log::info("QUERY_DEBUG: Field '{$field}' < operator '{$operator}' < value " . json_encode($value));
+        }
+        
+        switch ($operator) {
+            case '=':
+            case 'equals':
+                if (in_array($field, $textFields)) {
+                    $query->whereRaw('UPPER(' . $field . ') = UPPER(?)', [$value]);
+                } else {
+                    $query->where($field, '=', $value);
+                }
+                break;
+            case 'contains':
+            case 'like':
+                if (in_array($field, $textFields)) {
+                    $query->whereRaw('UPPER(' . $field . ') LIKE UPPER(?)', ['%' . $value . '%']);
+                } else {
+                    $query->where($field, 'LIKE', '%' . $value . '%');
+                }
+                break;
+            case 'beginsWith':
+                if (in_array($field, $textFields)) {
+                    $query->whereRaw('UPPER(' . $field . ') LIKE UPPER(?)', [$value . '%']);
+                } else {
+                    $query->where($field, 'LIKE', $value . '%');
+                }
+                break;
+            case 'endsWith':
+                if (in_array($field, $textFields)) {
+                    $query->whereRaw('UPPER(' . $field . ') LIKE UPPER(?)', ['%' . $value]);
+                } else {
+                    $query->where($field, 'LIKE', '%' . $value);
+                }
+                break;
+            case '>=':
+            case 'gte':
+                $query->where($field, '>=', $value);
+                break;
+            case '<=':
+            case 'lte':
+                $query->where($field, '<=', $value);
+                break;
+            case '>':
+            case 'gt':
+                $query->where($field, '>', $value);
+                break;
+            case '<':
+            case 'lt':
+                $query->where($field, '<', $value);
+                break;
+            case '!=':
+            case 'doesNotEqual':
+                $query->where($field, '!=', $value);
+                break;
+            case 'between':
+                $betweenValues = is_array($value) ? $value : $this->parseBetweenValue($value);
+                if (is_array($betweenValues) && count($betweenValues) === 2) {
+                    // Cast numeric values if needed
+                    if (in_array($field, $numericFields)) {
+                        $betweenValues = array_map('floatval', $betweenValues);
+                    }
+                    $query->whereBetween($field, $betweenValues);
+                }
+                break;
+            case 'notBetween':
+                $betweenValues = is_array($value) ? $value : $this->parseBetweenValue($value);
+                if (is_array($betweenValues) && count($betweenValues) === 2) {
+                    // Cast numeric values if needed
+                    if (in_array($field, $numericFields)) {
+                        $betweenValues = array_map('floatval', $betweenValues);
+                    }
+                    $query->whereNotBetween($field, $betweenValues);
+                }
+                break;
+            case 'null':
+                $query->whereNull($field);
+                break;
+            case 'notNull':
+                $query->whereNotNull($field);
+                break;
+            default:
+                // Default to text-based search for unknown operators
+                if (in_array($field, $textFields)) {
+                    $query->whereRaw('UPPER(' . $field . ') LIKE UPPER(?)', ['%' . $value . '%']);
+                } else {
+                    $query->where($field, '=', $value);
+                }
+        }
+    }
+    
+    /**
+     * Parse between operator values from string to array.
+     * Handles comma-separated values like "2025-05-01, 2025-05-02"
+     */
+    private function parseBetweenValue($value)
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+        
+        if (is_string($value) && strpos($value, ',') !== false) {
+            $parts = array_map('trim', explode(',', $value));
+            if (count($parts) === 2) {
+                return $parts;
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Apply react-querybuilder JSON to the Eloquent query, supporting AND/OR and nested relations.
+     */
+    protected function applyQueryBuilderJson($builder, array $group, $parentCombinator = 'and')
+    {
+        $combinator = $group['combinator'] ?? 'and';
+        $rules = $group['rules'] ?? [];
+
+        $methodGroup = $parentCombinator === 'or' ? 'orWhere' : 'where';
+
+        $builder->$methodGroup(function($q) use ($rules, $combinator) {
+            foreach ($rules as $ruleIndex => $rule) {
+                if (isset($rule['rules'])) {
+                    // Nested group
+                    $this->applyQueryBuilderJson($q, $rule, $combinator);
+                    continue;
+                }
+
+                $field = $rule['field'] ?? '';
+                $operator = $rule['operator'] ?? '=';
+                $value = $rule['value'] ?? null;
+
+                // Skip if no value provided (except for null/notNull operators)
+                if (($value === null || $value === '') && !in_array($operator, ['null', 'notNull'])) {
+                    continue;
+                }
+
+                $isOr = ($combinator === 'or');
+                $whereMethod = $isOr ? 'orWhere' : 'where';
+
+                // Map specific fields to relations/columns
+                if ($field === 'nomordaftar') {
+                    // Handle PIB number searches with various operators
+                    switch ($operator) {
+                        case '=':
+                        case 'equals':
+                            $q->$whereMethod('bc20_header.nomordaftar', '=', $value);
+                            break;
+                        case 'contains':
+                        case 'like':
+                            $q->$whereMethod('bc20_header.nomordaftar', 'LIKE', '%' . $value . '%');
+                            break;
+                        case 'beginsWith':
+                            $q->$whereMethod('bc20_header.nomordaftar', 'LIKE', $value . '%');
+                            break;
+                        case 'endsWith':
+                            $q->$whereMethod('bc20_header.nomordaftar', 'LIKE', '%' . $value);
+                            break;
+                        default:
+                            $q->$whereMethod('bc20_header.nomordaftar', 'LIKE', $value . '%');
+                    }
+                } elseif ($field === 'tanggaldaftar') {
+                    // Date comparisons
+                    switch ($operator) {
+                        case '=':
+                            $q->$whereMethod(DB::raw('DATE(bc20_header.tanggaldaftar)'), '=', $value);
+                            break;
+                        case '>=':
+                            $q->$whereMethod(DB::raw('DATE(bc20_header.tanggaldaftar)'), '>=', $value);
+                            break;
+                        case '<=':
+                            $q->$whereMethod(DB::raw('DATE(bc20_header.tanggaldaftar)'), '<=', $value);
+                            break;
+                        case 'between':
+                            $betweenValues = is_array($value) ? $value : $this->parseBetweenValue($value);
+                            if (is_array($betweenValues) && count($betweenValues) === 2) {
+                                $inner = $isOr ? 'orWhereBetween' : 'whereBetween';
+                                $q->$inner(DB::raw('DATE(bc20_header.tanggaldaftar)'), $betweenValues);
+                            }
+                            break;
+                        case 'notBetween':
+                            $betweenValues = is_array($value) ? $value : $this->parseBetweenValue($value);
+                            if (is_array($betweenValues) && count($betweenValues) === 2) {
+                                $inner = $isOr ? 'orWhereNotBetween' : 'whereNotBetween';
+                                $q->$inner(DB::raw('DATE(bc20_header.tanggaldaftar)'), $betweenValues);
+                            }
+                            break;
+                        default:
+                            $q->$whereMethod(DB::raw('DATE(bc20_header.tanggaldaftar)'), '=', $value);
+                    }
+                } elseif ($field === 'kodejalur') {
+                    $q->$whereMethod('bc20_header.kodejalur', '=', $value);
+                } elseif (strpos($field, 'kontainer.') === 0) {
+                    // Handle all kontainer fields generically
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('kontainer', function($qc) use ($value, $operator, $field) {
+                        $subField = str_replace('kontainer.', '', $field);
+                        $textFields = ['nomorkontainer', 'namaukurankontainer', 'namajeniskontainer'];
+                        $numericFields = ['serikontainer'];
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, $textFields, $numericFields);
+                    });
+                } elseif (strpos($field, 'barang.') === 0) {
+                    // Handle all barang fields generically
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('barang', function($qc) use ($value, $operator, $field) {
+                        $subField = str_replace('barang.', '', $field);
+                        $textFields = ['postarif', 'uraian', 'kodebarang', 'kodesatuanbarang', 'kodejeniskemasan', 'namajeniskemasan', 'namasatuanbarang', 'namakondisibarang', 'namakategoribarang', 'namanegaraasal', 'namadaerahasal', 'namaperhitungan', 'merk', 'tipe', 'spesifikasilain', 'ukuran', 'bahanbaku', 'barangpemilik', 'barangspekkhusus'];
+                        $numericFields = ['jumlahsatuan', 'cif', 'fob', 'freight', 'asuransi', 'hargaekspor', 'hargapenyerahan', 'nilaijasa', 'netto', 'bruto', 'volume', 'seribarang', 'jumlahkemasan'];
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, $textFields, $numericFields);
+                    });
+                } elseif (strpos($field, 'importir.') === 0) {
+                    // Handle importir fields
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('entitas', function($qc) use ($value, $operator, $field) {
+                        $qc->where('kodeentitas', '1'); // Importir
+                        $subField = str_replace('importir.', '', $field);
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, ['namaentitas', 'alamatentitas', 'namanegara'], []);
+                    });
+                } elseif (strpos($field, 'ppjk.') === 0) {
+                    // Handle PPJK fields
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('entitas', function($qc) use ($value, $operator, $field) {
+                        $qc->where('kodeentitas', '4'); // PPJK
+                        $subField = str_replace('ppjk.', '', $field);
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, ['namaentitas', 'alamatentitas', 'namanegara'], []);
+                    });
+                } elseif (strpos($field, 'penjual.') === 0) {
+                    // Handle penjual fields
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('entitas', function($qc) use ($value, $operator, $field) {
+                        $qc->where('kodeentitas', '10'); // Penjual
+                        $subField = str_replace('penjual.', '', $field);
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, ['namaentitas', 'alamatentitas', 'namanegara'], []);
+                    });
+                } elseif (strpos($field, 'pengirim.') === 0) {
+                    // Handle pengirim fields
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('entitas', function($qc) use ($value, $operator, $field) {
+                        $qc->where('kodeentitas', '9'); // Pengirim
+                        $subField = str_replace('pengirim.', '', $field);
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, ['namaentitas', 'alamatentitas', 'namanegara'], []);
+                    });
+                } elseif (strpos($field, 'pemilik.') === 0) {
+                    // Handle pemilik fields
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('entitas', function($qc) use ($value, $operator, $field) {
+                        $qc->where('kodeentitas', '7'); // Pemilik
+                        $subField = str_replace('pemilik.', '', $field);
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, ['namaentitas', 'alamatentitas', 'namanegara'], []);
+                    });
+                } elseif (strpos($field, 'data.') === 0) {
+                    // Handle all data fields generically
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('data', function($qc) use ($value, $operator, $field) {
+                        $subField = str_replace('data.', '', $field);
+                        $textFields = ['kodepelmuat', 'namapelabuhanmuat', 'kodepeltransit', 'namapelabuhantransit', 'kodetps', 'namatpswajib', 'kodekantor', 'namakantorpendek', 'kodevaluta'];
+                        $numericFields = ['netto', 'bruto', 'cif', 'ndpbm', 'nilaipabean', 'fob', 'freight', 'asuransi', 'volume', 'vd', 'uangmuka', 'nilaijasa', 'nilaikurs', 'ppnpajak', 'ppnbmpajak', 'tarifppnpajak', 'tarifppnbmpajak', 'biayapenambah', 'biayapengurang', 'dasarpengenaanpajak', 'hargapenyerahan', 'hargaperolehan', 'nilaimaklon'];
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, $textFields, $numericFields);
+                    });
+                } elseif (strpos($field, 'pengangkut.') === 0) {
+                    // Handle all pengangkut fields generically
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('pengangkut', function($qc) use ($value, $operator, $field) {
+                        $subField = str_replace('pengangkut.', '', $field);
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, ['namapengangkut', 'nomorpengangkut', 'kodebendera', 'namanegara'], []);
+                    });
+                } elseif (strpos($field, 'dokumen.') === 0) {
+                    // Handle all dokumen fields generically
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('dokumen', function($qc) use ($value, $operator, $field) {
+                        $subField = str_replace('dokumen.', '', $field);
+                        $textFields = ['namadokumen', 'nomordokumen', 'namafasilitas', 'kodefasilitas'];
+                        $numericFields = ['seridokumen'];
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, $textFields, $numericFields);
+                    });
+                } elseif (strpos($field, 'pungutan.') === 0) {
+                    // Handle all pungutan fields generically
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('pungutan', function($qc) use ($value, $operator, $field) {
+                        $subField = str_replace('pungutan.', '', $field);
+                        $textFields = ['keterangan'];
+                        $numericFields = ['dibayar'];
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, $textFields, $numericFields);
+                    });
+                } elseif (strpos($field, 'kemasan.') === 0) {
+                    // Handle all kemasan fields generically
+                    $hasMethod = $isOr ? 'orWhereHas' : 'whereHas';
+                    $q->$hasMethod('kemasan', function($qc) use ($value, $operator, $field) {
+                        $subField = str_replace('kemasan.', '', $field);
+                        $textFields = ['kodejeniskemasan', 'namakemasan'];
+                        $numericFields = ['jumlahkemasan', 'serikemasan'];
+                        $this->applyGenericFieldOperator($qc, $subField, $operator, $value, $textFields, $numericFields);
+                    });
+                } else {
+                    // Fallback: try to match header columns or use contains for text
+                    if (in_array($field, ['nomordaftar', 'tanggaldaftar', 'kodejalur', 'nomoraju'])) {
+                        $column = 'bc20_header.' . $field;
+                        if ($operator === 'contains' || $operator === 'like') {
+                            $q->$whereMethod($column, 'LIKE', '%' . $value . '%');
+                        } elseif ($operator === 'between') {
+                            $betweenValues = is_array($value) ? $value : $this->parseBetweenValue($value);
+                            if (is_array($betweenValues) && count($betweenValues) === 2) {
+                                $inner = $isOr ? 'orWhereBetween' : 'whereBetween';
+                                $q->$inner($column, $betweenValues);
+                            }
+                        } elseif ($operator === 'notBetween') {
+                            $betweenValues = is_array($value) ? $value : $this->parseBetweenValue($value);
+                            if (is_array($betweenValues) && count($betweenValues) === 2) {
+                                $inner = $isOr ? 'orWhereNotBetween' : 'whereNotBetween';
+                                $q->$inner($column, $betweenValues);
+                            }
+                        } elseif ($operator === '>=' || $operator === 'gte') {
+                            $q->$whereMethod($column, '>=', $value);
+                        } elseif ($operator === '<=' || $operator === 'lte') {
+                            $q->$whereMethod($column, '<=', $value);
+                        } elseif ($operator === '>' || $operator === 'gt') {
+                            $q->$whereMethod($column, '>', $value);
+                        } elseif ($operator === '<' || $operator === 'lt') {
+                            $q->$whereMethod($column, '<', $value);
+                        } elseif ($operator === '!=' || $operator === 'doesNotEqual') {
+                            $q->$whereMethod($column, '!=', $value);
+                        } else {
+                            $q->$whereMethod($column, '=', $value);
+                        }
+                    } else {
+                        // For unknown fields, handle operators
+                        if ($operator === 'between') {
+                            $betweenValues = is_array($value) ? $value : $this->parseBetweenValue($value);
+                            if (is_array($betweenValues) && count($betweenValues) === 2) {
+                                $inner = $isOr ? 'orWhereBetween' : 'whereBetween';
+                                $q->$inner($field, $betweenValues);
+                            }
+                        } elseif ($operator === 'notBetween') {
+                            $betweenValues = is_array($value) ? $value : $this->parseBetweenValue($value);
+                            if (is_array($betweenValues) && count($betweenValues) === 2) {
+                                $inner = $isOr ? 'orWhereNotBetween' : 'whereNotBetween';
+                                $q->$inner($field, $betweenValues);
+                            }
+                        } else {
+                            $q->$whereMethod($field, '=', $value);
+                        }
+                    }
+                }
+            }
+        });
+    }
+    /**
      * Display the customs data management page.
      */
     public function index()
@@ -46,8 +402,12 @@ class CustomsDataController extends Controller
             'nama_pengangkut' => 'nullable|string|max:255',
             'page' => 'integer|min:1',
             'per_page' => 'integer|min:1|max:100',
-            'sort_by' => ['nullable', Rule::in(['nomordaftar', 'tanggaldaftar', 'kodejalur', 'namaimportir', 'namappjk', 'namapenjual', 'hscode', 'uraianbarang'])],
+            'sort_by' => ['nullable', Rule::in(['nomordaftar', 'tanggaldaftar', 'kodejalur', 'namaimportir', 'namappjk', 'namapenjual', 'kontainer', 'teus', 'barang', 'hscode', 'uraianbarang'])],
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
+            'query_json' => 'nullable|json',
+            // Between operator support for legacy params
+            'nomordaftar_not_between_min' => 'nullable|numeric',
+            'nomordaftar_not_between_max' => 'nullable|numeric',
         ]);
 
         $query = BC20Header::query()
@@ -66,45 +426,83 @@ class CustomsDataController extends Controller
                     $query->select('idheader', 'seribarang', 'postarif', 'uraian')
                           ->orderBy('seribarang', 'asc')
                           ->limit(1);
-                },
-                'data' => function($query) {
-                    $query->select('idheader', 'kodepelmuat', 'kodepeltransit', 'kodetps')
-                          ->limit(1);
-                },
-                'pengangkut' => function($query) {
-                    $query->select('idheader', 'namapengangkut')
-                          ->limit(1);
                 }
+            ])
+            // LEFT JOIN to calculate kontainer count and TEUS
+            ->leftJoin(
+                DB::raw('(
+                    SELECT 
+                        bh.idheader,
+                        COUNT(bk.nomorkontainer) AS kontainer,
+                        SUM(
+                            CASE bk.kodeukurankontainer
+                                WHEN \'20\' THEN 1.0
+                                WHEN \'40\' THEN 2.0
+                                WHEN \'45\' THEN 2.25
+                                WHEN \'60\' THEN 3.0
+                                ELSE 0.0
+                            END
+                        ) AS teus
+                    FROM customs.bc20_kontainer bk
+                    JOIN customs.bc20_header bh ON bk.idheader = bh.idheader
+                    GROUP BY bh.idheader
+                ) as kontainer_agg'),
+                'bc20_header.idheader', '=', 'kontainer_agg.idheader'
+            )
+            // LEFT JOIN to calculate barang count
+            ->leftJoin(
+                DB::raw('(
+                    SELECT 
+                        bh.idheader,
+                        COUNT(bb.idbarang) AS barang_count
+                    FROM customs.bc20_barang bb
+                    JOIN customs.bc20_header bh ON bb.idheader = bh.idheader
+                    GROUP BY bh.idheader
+                ) as barang_agg'),
+                'bc20_header.idheader', '=', 'barang_agg.idheader'
+            )
+            ->addSelect([
+                'kontainer_agg.kontainer',
+                'kontainer_agg.teus',
+                'barang_agg.barang_count as barang_total'
             ]);
 
-        // Apply filters or default to today's date
-        if ($request->filled('start_date') && $request->filled('end_date')) {
-            // Use user-provided date range
-            $query->dateRange($request->start_date, $request->end_date);
+        // If complex query JSON is provided, apply it and skip default filters
+        if ($request->filled('query_json')) {
+            \Log::info('=== ADVANCED QUERY BUILDER ACTIVATED ===');
+            \Log::info('Query JSON: ' . $request->query_json);
+            $this->applyQueryBuilderJson($query, json_decode($request->query_json, true));
+            \Log::info('DEBUG: Generated SQL: ' . $query->toSql());
+            \Log::info('DEBUG: Query bindings: ' . json_encode($query->getBindings()));
         } else {
-            // Check if any meaningful filters are applied
-            $hasFilters = $request->filled('nomordaftar') || 
-                         $request->filled('kodejalur') ||
-                         $request->filled('namaimportir') ||
-                         $request->filled('namapenjual') ||
-                         $request->filled('namapengirim') ||
-                         $request->filled('namappjk') ||
-                         $request->filled('negaraasal') ||
-                         $request->filled('uraianbarang') ||
-                         $request->filled('hscode') ||
-                         $request->filled('nomorkontainer') ||
-                         $request->filled('pelabuhan_muat') ||
-                         $request->filled('pelabuhan_transit') ||
-                         $request->filled('kode_tps') ||
-                         $request->filled('nama_pengangkut');
-            
-            if (!$hasFilters) {
-                // No meaningful filters applied, default to today's data
-                $query->whereDate('tanggaldaftar', now()->toDateString());
+            // Apply filters or default to today's date
+            if ($request->filled('start_date') && $request->filled('end_date')) {
+                // Use user-provided date range
+                $query->dateRange($request->start_date, $request->end_date);
+            } else {
+                // Check if any meaningful filters are applied
+                $hasFilters = $request->filled('nomordaftar') || 
+                             $request->filled('kodejalur') ||
+                             $request->filled('namaimportir') ||
+                             $request->filled('namapenjual') ||
+                             $request->filled('namapengirim') ||
+                             $request->filled('namappjk') ||
+                             $request->filled('negaraasal') ||
+                             $request->filled('uraianbarang') ||
+                             $request->filled('hscode') ||
+                             $request->filled('nomorkontainer') ||
+                             $request->filled('pelabuhan_muat') ||
+                             $request->filled('pelabuhan_transit') ||
+                             $request->filled('kode_tps') ||
+                             $request->filled('nama_pengangkut');
+                
+                if (!$hasFilters) {
+                    // No meaningful filters applied, default to today's data
+                    $query->whereDate('tanggaldaftar', now()->toDateString());
+                }
             }
-        }
 
-        // Basic filters
+            // Basic filters
         if ($request->filled('nomordaftar')) {
             $query->byRegistrationNumber($request->nomordaftar);
         }
@@ -193,6 +591,7 @@ class CustomsDataController extends Controller
                 $q->whereRaw('UPPER(namapengangkut) LIKE UPPER(?)', ['%' . $request->nama_pengangkut . '%']);
             });
         }
+        } // end else branch for legacy filters
 
         // Apply sorting
         $sortBy = $request->get('sort_by', 'nomordaftar');
@@ -229,6 +628,15 @@ class CustomsDataController extends Controller
                 ->addSelect('sort_penjual.namaentitas as sort_penjual_name')
                 ->orderBy('sort_penjual.namaentitas', $sortDirection);
                 break;
+            case 'kontainer':
+                $query->orderBy('kontainer_agg.kontainer', $sortDirection);
+                break;
+            case 'teus':
+                $query->orderBy('kontainer_agg.teus', $sortDirection);
+                break;
+            case 'barang':
+                $query->orderBy('barang_total', $sortDirection);
+                break;
             case 'hscode':
                 $query->leftJoin('customs.bc20_barang as sort_barang_hs', function($join) {
                     $join->on('bc20_header.idheader', '=', 'sort_barang_hs.idheader')
@@ -254,35 +662,43 @@ class CustomsDataController extends Controller
         $perPage = $request->get('per_page', 20);
         $data = $query->paginate($perPage);
 
-        // Transform the data to include relationship data
+        // Transform the data to include only the fields needed for table display
         $data->getCollection()->transform(function ($item) {
             // Get entity data by code
             $importir = $item->entitas->where('kodeentitas', '1')->first();
             $ppjk = $item->entitas->where('kodeentitas', '4')->first();
             $penjual = $item->entitas->where('kodeentitas', '10')->first();
             
-            // Get first barang item
-            $firstBarang = $item->barang->first();
+            // Get barang count from aggregation (using barang_total field)
+            $barangCount = $item->barang_total ?? 0;
             
-            // Get first data item
-            $firstData = $item->data->first();
+            // Ensure barangCount is a number, not a collection
+            if (is_object($barangCount) || is_array($barangCount)) {
+                $barangCount = 0;
+            }
             
-            // Get first pengangkut item
-            $firstPengangkut = $item->pengangkut->first();
+            // Get first barang item from relationship
+            $firstBarang = $item->barang && $item->barang->count() > 0 ? $item->barang->first() : null;
             
-            // Add the related data as attributes
+            // Extract data we need from the relationship before removing it
+            $hscode = $firstBarang ? $firstBarang->postarif : null;
+            $uraianbarang = $firstBarang ? $firstBarang->uraian : null;
+            
+            // Remove the relationships first to avoid conflicts
+            unset($item->entitas, $item->barang);
+            
+            // Add only the fields needed for table display (12 fields total)
             $item->namaimportir = $importir ? $importir->namaentitas : null;
             $item->namappjk = $ppjk ? $ppjk->namaentitas : null;
             $item->namapenjual = $penjual ? $penjual->namaentitas : null;
-            $item->hscode = $firstBarang ? $firstBarang->postarif : null;
-            $item->uraianbarang = $firstBarang ? $firstBarang->uraian : null;
-            $item->kodepelmuat = $firstData ? $firstData->kodepelmuat : null;
-            $item->kodepeltransit = $firstData ? $firstData->kodepeltransit : null;
-            $item->kodetps = $firstData ? $firstData->kodetps : null;
-            $item->namapengangkut = $firstPengangkut ? $firstPengangkut->namapengangkut : null;
+            $item->kontainer = $item->kontainer ? (int) $item->kontainer : 0;
+            $item->teus = $item->teus ? (float) $item->teus : 0.0;
+            $item->barang = (int) $barangCount;
+            $item->hscode = $hscode;
+            $item->uraianbarang = $uraianbarang;
             
-            // Remove the relationships from the response to keep it clean
-            unset($item->entitas, $item->barang, $item->data, $item->pengangkut);
+            // Remove temporary fields from the response
+            unset($item->barang_total);
             
             return $item;
         });
@@ -358,6 +774,35 @@ class CustomsDataController extends Controller
                 'bc20_header.nomoraju'
             ]);
             
+        // Only add kontainer/teus aggregation if 'basic' section is selected AND 'containers' section is NOT selected
+        // (to avoid conflict between aggregated counts and relationship loading)
+        if (in_array('basic', $sections) && !in_array('containers', $sections)) {
+            $query->leftJoin(
+                DB::raw('(
+                    SELECT 
+                        bh.idheader,
+                        COUNT(bk.nomorkontainer) AS kontainer,
+                        SUM(
+                            CASE bk.kodeukurankontainer
+                                WHEN \'20\' THEN 1.0
+                                WHEN \'40\' THEN 2.0
+                                WHEN \'45\' THEN 2.25
+                                WHEN \'60\' THEN 3.0
+                                ELSE 0.0
+                            END
+                        ) AS teus
+                    FROM customs.bc20_kontainer bk
+                    JOIN customs.bc20_header bh ON bk.idheader = bh.idheader
+                    GROUP BY bh.idheader
+                ) as export_kontainer_agg'),
+                'bc20_header.idheader', '=', 'export_kontainer_agg.idheader'
+            )
+            ->addSelect([
+                'export_kontainer_agg.kontainer',
+                'export_kontainer_agg.teus'
+            ]);
+        }
+            
         // Load relationships based on selected sections
         $with = [];
         
@@ -400,13 +845,11 @@ class CustomsDataController extends Controller
             };
         }
         
-        // Load kontainer when containers section is selected
-        if (in_array('containers', $sections)) {
-            $with['kontainer'] = function($query) {
-                $query->select('idheader', 'serikontainer', 'nomorkontainer', 'namaukurankontainer', 'namajeniskontainer')
-                      ->orderBy('serikontainer', 'asc');
-            };
-        }
+        // Always load kontainer relationship - needed for multiple sheets
+        $with['kontainer'] = function($query) {
+            $query->select('idheader', 'serikontainer', 'nomorkontainer', 'namaukurankontainer', 'namajeniskontainer', 'kodeukurankontainer')
+                  ->orderBy('serikontainer', 'asc');
+        };
         
         // Load pungutan when duties section is selected
         if (in_array('duties', $sections)) {
@@ -519,6 +962,14 @@ class CustomsDataController extends Controller
                 $q->whereRaw('UPPER(namapengangkut) LIKE UPPER(?)', ['%' . $request->nama_pengangkut . '%']);
             });
         }
+        
+        // Handle between/notBetween operators for legacy URL parameters
+        if ($request->filled('nomordaftar_not_between_min') && $request->filled('nomordaftar_not_between_max')) {
+            $query->whereNotBetween('bc20_header.nomordaftar', [
+                $request->nomordaftar_not_between_min,
+                $request->nomordaftar_not_between_max
+            ]);
+        }
     }
     
     /**
@@ -555,6 +1006,12 @@ class CustomsDataController extends Controller
                          ->where('sort_penjual.kodeentitas', '=', '10');
                 })
                 ->orderBy('sort_penjual.namaentitas', $sortDirection);
+                break;
+            case 'kontainer':
+                $query->orderBy('export_kontainer_agg.kontainer', $sortDirection);
+                break;
+            case 'teus':
+                $query->orderBy('export_kontainer_agg.teus', $sortDirection);
                 break;
             case 'hscode':
                 $query->leftJoin('customs.bc20_barang as sort_barang_hs', function($join) {
@@ -712,7 +1169,7 @@ class CustomsDataController extends Controller
             'pelabuhan_transit' => 'nullable|string|max:6',
             'kode_tps' => 'nullable|string|max:255',
             'nama_pengangkut' => 'nullable|string|max:255',
-            'sort_by' => ['nullable', Rule::in(['nomordaftar', 'tanggaldaftar', 'kodejalur', 'namaimportir', 'namappjk', 'namapenjual', 'hscode', 'uraianbarang'])],
+            'sort_by' => ['nullable', Rule::in(['nomordaftar', 'tanggaldaftar', 'kodejalur', 'namaimportir', 'namappjk', 'namapenjual', 'kontainer', 'teus', 'hscode', 'uraianbarang'])],
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
             'sections' => 'nullable|string', // Comma-separated list of sections
         ]);

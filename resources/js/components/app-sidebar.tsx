@@ -2,10 +2,10 @@ import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';
 import { NavUser } from '@/components/nav-user';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar';
-import { dashboard, data, managementUsers, managementRoles } from '@/routes';
+import { dashboard, data, dataRuleSets, managementUsers, managementRoles } from '@/routes';
 import { type NavItem, type NavGroup } from '@/types';
 import { Link } from '@inertiajs/react';
-import { LayoutGrid, Database, Users, Shield } from 'lucide-react';
+import { LayoutGrid, Database, Users, Shield, Settings } from 'lucide-react';
 import AppLogo from './app-logo';
 import useAuth from '@/hooks/useAuth';
 
@@ -26,6 +26,15 @@ export function AppSidebar() {
             title: 'Data',
             href: data(),
             icon: Database,
+        });
+    }
+    
+    // Add Rule Sets section if user has permission
+    if (hasPermission('rulesets.view')) {
+        platformNavItems.push({
+            title: 'Rule Sets',
+            href: dataRuleSets(),
+            icon: Settings,
         });
     }
     

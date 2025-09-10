@@ -71,6 +71,9 @@ interface CustomsRecord {
   namaimportir?: string;
   namappjk?: string;
   namapenjual?: string;
+  kontainer?: number;
+  teus?: number;
+  barang?: number;
   hscode?: string;
   uraianbarang?: string;
 }
@@ -128,6 +131,7 @@ export default function CustomsData() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [filterExpanded, setFilterExpanded] = useState(true);
   const [savedScrollPosition, setSavedScrollPosition] = useState<number | null>(null);
+  const [hasSearched, setHasSearched] = useState(false);
   
   // Sorting state
   const [sortBy, setSortBy] = useState('nomordaftar');
@@ -152,7 +156,7 @@ export default function CustomsData() {
         }
       }
 
-      const response = await fetch(`/data/api/customs?${params.toString()}`);
+      const response = await fetch(`/api/data/customs?${params.toString()}`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -190,7 +194,7 @@ export default function CustomsData() {
   const fetchDetailData = useCallback(async (idheader: string) => {
     setDetailLoading(true);
     try {
-      const response = await fetch(`/data/api/customs/${idheader}/detail`);
+      const response = await fetch(`/api/data/customs/${idheader}`);
       const result = await response.json();
       setDetailData(result);
     } catch (error) {
@@ -200,10 +204,10 @@ export default function CustomsData() {
     }
   }, []);
 
-  // Initial data load
-  useEffect(() => {
-    fetchData(1, 10);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Don't load data initially - wait for user to search
+  // useEffect(() => {
+  //   fetchData(1, 10);
+  // }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Restore scroll position after pagination
   useEffect(() => {
@@ -222,6 +226,7 @@ export default function CustomsData() {
 
   // Handle filter submit
   const handleFilterSubmit = () => {
+    setHasSearched(true);
     fetchData(1, pagination.per_page || 10);
   };
 
@@ -251,48 +256,20 @@ export default function CustomsData() {
     setSortDirection('asc');
     setExpandedRow(null);
     setDetailData(null);
+    setHasSearched(false);
     
-    // Trigger data fetch immediately with empty filters
-    setLoading(true);
-    const fetchResetData = async () => {
-      try {
-        const params = new URLSearchParams({
-          page: '1',
-          per_page: '10',
-          sort_by: 'nomordaftar',
-          sort_direction: 'asc',
-        });
-
-        const response = await fetch(`/data/api/customs?${params.toString()}`);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result: ApiResponse = await response.json();
-
-        if (result && result.data && typeof result.current_page !== 'undefined') {
-          setData(result.data);
-          setPagination({
-            current_page: result.current_page,
-            last_page: result.last_page,
-            per_page: result.per_page,
-            total: result.total,
-            from: result.from,
-            to: result.to,
-          });
-        } else {
-          console.error('Invalid API response structure:', result);
-          setData([]);
-        }
-      } catch (error) {
-        console.error('Error fetching reset data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+    // Clear data and reset pagination
+    setData([]);
+    setPagination({
+      current_page: 1,
+      last_page: 1,
+      per_page: 10,
+      total: 0,
+      from: 0,
+      to: 0,
+    });
     
-    fetchResetData();
+    // Don't fetch data on reset - wait for user to search again
   };
 
   // Handle pagination
@@ -367,7 +344,7 @@ export default function CustomsData() {
     params.set('sections', sections.join(','));
     
     // Open export URL
-    window.open(`/data/api/export/${format}?${params.toString()}`);
+    window.open(`/api/data/export/${format}?${params.toString()}`);
   };
 
   return (
@@ -418,106 +395,108 @@ export default function CustomsData() {
               <h2 className="text-xl font-semibold">Search Results</h2>
             </div>
             
-            {/* Pagination Controls at Top */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-                <div className="text-sm text-muted-foreground">
-                  Showing {pagination.from} to {pagination.to} of {pagination.total} results
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Per page:</span>
-                  <Select
-                    value={pagination.per_page.toString()}
-                    onValueChange={(value) => handlePerPageChange(parseInt(value))}
-                  >
-                    <SelectTrigger className="w-20">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="10">10</SelectItem>
-                      <SelectItem value="15">15</SelectItem>
-                      <SelectItem value="20">20</SelectItem>
-                      <SelectItem value="25">25</SelectItem>
-                      <SelectItem value="50">50</SelectItem>
-                      <SelectItem value="75">75</SelectItem>
-                      <SelectItem value="100">100</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              {pagination.last_page > 1 && (
-                <div className="flex items-center justify-center gap-1 sm:gap-2 overflow-x-auto">
-                  {/* First page */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(1)}
-                    disabled={pagination.current_page === 1}
-                    className="shrink-0"
-                  >
-                    <ChevronFirst className="h-4 w-4" />
-                  </Button>
-
-                  {/* Previous page */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(pagination.current_page - 1)}
-                    disabled={pagination.current_page === 1}
-                    className="shrink-0"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-
-                  {/* Page numbers */}
-                  <div className="flex items-center gap-1 overflow-x-auto">
-                    {(() => {
-                      const pages = [];
-                      const start = Math.max(1, pagination.current_page - 1);
-                      const end = Math.min(pagination.last_page, pagination.current_page + 1);
-
-                      for (let i = start; i <= end; i++) {
-                        pages.push(
-                          <Button
-                            key={i}
-                            variant={i === pagination.current_page ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => handlePageChange(i)}
-                            className="w-8 shrink-0"
-                          >
-                            {i}
-                          </Button>
-                        );
-                      }
-                      return pages;
-                    })()}
+            {/* Pagination Controls at Top - Only show if search has been performed */}
+            {hasSearched && (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {pagination.from} to {pagination.to} of {pagination.total} results
                   </div>
-
-                  {/* Next page */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(pagination.current_page + 1)}
-                    disabled={pagination.current_page === pagination.last_page}
-                    className="shrink-0"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-
-                  {/* Last page */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(pagination.last_page)}
-                    disabled={pagination.current_page === pagination.last_page}
-                    className="shrink-0"
-                  >
-                    <ChevronLast className="h-4 w-4" />
-                  </Button>
+                  
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Per page:</span>
+                    <Select
+                      value={pagination.per_page.toString()}
+                      onValueChange={(value) => handlePerPageChange(parseInt(value))}
+                    >
+                      <SelectTrigger className="w-20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="10">10</SelectItem>
+                        <SelectItem value="15">15</SelectItem>
+                        <SelectItem value="20">20</SelectItem>
+                        <SelectItem value="25">25</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
+                        <SelectItem value="75">75</SelectItem>
+                        <SelectItem value="100">100</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-              )}
-            </div>
+                {pagination.last_page > 1 && (
+                  <div className="flex items-center justify-center gap-1 sm:gap-2 overflow-x-auto">
+                    {/* First page */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(1)}
+                      disabled={pagination.current_page === 1}
+                      className="shrink-0"
+                    >
+                      <ChevronFirst className="h-4 w-4" />
+                    </Button>
+
+                    {/* Previous page */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(pagination.current_page - 1)}
+                      disabled={pagination.current_page === 1}
+                      className="shrink-0"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+
+                    {/* Page numbers */}
+                    <div className="flex items-center gap-1 overflow-x-auto">
+                      {(() => {
+                        const pages = [];
+                        const start = Math.max(1, pagination.current_page - 1);
+                        const end = Math.min(pagination.last_page, pagination.current_page + 1);
+
+                        for (let i = start; i <= end; i++) {
+                          pages.push(
+                            <Button
+                              key={i}
+                              variant={i === pagination.current_page ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => handlePageChange(i)}
+                              className="w-8 shrink-0"
+                            >
+                              {i}
+                            </Button>
+                          );
+                        }
+                        return pages;
+                      })()}
+                    </div>
+
+                    {/* Next page */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(pagination.current_page + 1)}
+                      disabled={pagination.current_page === pagination.last_page}
+                      className="shrink-0"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+
+                    {/* Last page */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(pagination.last_page)}
+                      disabled={pagination.current_page === pagination.last_page}
+                      className="shrink-0"
+                    >
+                      <ChevronLast className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <ResultsTable
               data={data}
@@ -531,6 +510,7 @@ export default function CustomsData() {
               getSortIcon={getSortIcon}
               detailData={detailData}
               detailLoading={detailLoading}
+              hasSearched={hasSearched}
               onDetailClose={() => {
                 setExpandedRow(null);
                 setDetailData(null);
