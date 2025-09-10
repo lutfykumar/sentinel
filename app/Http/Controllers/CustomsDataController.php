@@ -157,97 +157,121 @@ class CustomsDataController extends Controller
      */
     private function applyRelatedFiltersAsSubqueries($query, Request $request)
     {
-        // Entity-based filters using WHERE IN subqueries (much faster than whereHas)
+        // Entity-based filters using WHERE EXISTS subqueries (much faster than whereHas)
         if ($request->filled('namaimportir')) {
-            $subquery = DB::table('customs.bc20_entitas')
-                ->select('idheader')
-                ->where('kodeentitas', '1')
-                ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namaimportir . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_entitas')
+                  ->whereColumn('bc20_entitas.idheader', 'bc20_header.idheader')
+                  ->where('kodeentitas', '1')
+                  ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namaimportir . '%']);
+            });
         }
         
         if ($request->filled('namappjk')) {
-            $subquery = DB::table('customs.bc20_entitas')
-                ->select('idheader')
-                ->where('kodeentitas', '4')
-                ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namappjk . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_entitas')
+                  ->whereColumn('bc20_entitas.idheader', 'bc20_header.idheader')
+                  ->where('kodeentitas', '4')
+                  ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namappjk . '%']);
+            });
         }
         
         if ($request->filled('namapenjual')) {
-            $subquery = DB::table('customs.bc20_entitas')
-                ->select('idheader')
-                ->where('kodeentitas', '10')
-                ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namapenjual . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_entitas')
+                  ->whereColumn('bc20_entitas.idheader', 'bc20_header.idheader')
+                  ->where('kodeentitas', '10')
+                  ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namapenjual . '%']);
+            });
         }
         
         if ($request->filled('namapengirim')) {
-            $subquery = DB::table('customs.bc20_entitas')
-                ->select('idheader')
-                ->where('kodeentitas', '9')
-                ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namapengirim . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_entitas')
+                  ->whereColumn('bc20_entitas.idheader', 'bc20_header.idheader')
+                  ->where('kodeentitas', '9')
+                  ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namapengirim . '%']);
+            });
         }
         
         if ($request->filled('negaraasal')) {
-            $subquery = DB::table('customs.bc20_entitas')
-                ->select('idheader')
-                ->where('kodeentitas', '9')
-                ->whereRaw('UPPER(kodenegara) LIKE UPPER(?)', ['%' . $request->negaraasal . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_entitas')
+                  ->whereColumn('bc20_entitas.idheader', 'bc20_header.idheader')
+                  ->where('kodeentitas', '9')
+                  ->whereRaw('UPPER(kodenegara) LIKE UPPER(?)', ['%' . $request->negaraasal . '%']);
+            });
         }
         
-        // Goods-based filters using subqueries
+        // Goods-based filters using WHERE EXISTS subqueries
         if ($request->filled('uraianbarang')) {
-            $subquery = DB::table('customs.bc20_barang')
-                ->select('idheader')
-                ->whereRaw('UPPER(uraian) LIKE UPPER(?)', ['%' . $request->uraianbarang . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_barang')
+                  ->whereColumn('bc20_barang.idheader', 'bc20_header.idheader')
+                  ->whereRaw('UPPER(uraian) LIKE UPPER(?)', ['%' . $request->uraianbarang . '%']);
+            });
         }
         
         if ($request->filled('hscode')) {
-            $subquery = DB::table('customs.bc20_barang')
-                ->select('idheader')
-                ->whereRaw('UPPER(postarif) LIKE UPPER(?)', [$request->hscode . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_barang')
+                  ->whereColumn('bc20_barang.idheader', 'bc20_header.idheader')
+                  ->whereRaw('UPPER(postarif) LIKE UPPER(?)', [$request->hscode . '%']);
+            });
         }
         
-        // Container-based filter using subquery
+        // Container-based filter using WHERE EXISTS subquery
         if ($request->filled('nomorkontainer')) {
-            $subquery = DB::table('customs.bc20_kontainer')
-                ->select('idheader')
-                ->whereRaw('UPPER(nomorkontainer) LIKE UPPER(?)', [$request->nomorkontainer . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_kontainer')
+                  ->whereColumn('bc20_kontainer.idheader', 'bc20_header.idheader')
+                  ->whereRaw('UPPER(nomorkontainer) LIKE UPPER(?)', [$request->nomorkontainer . '%']);
+            });
         }
         
-        // Port and transport filters using subqueries
+        // Port and transport filters using WHERE EXISTS subqueries
         if ($request->filled('pelabuhan_muat')) {
-            $subquery = DB::table('customs.bc20_data')
-                ->select('idheader')
-                ->whereRaw('UPPER(kodepelmuat) LIKE UPPER(?)', [$request->pelabuhan_muat . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_data')
+                  ->whereColumn('bc20_data.idheader', 'bc20_header.idheader')
+                  ->whereRaw('UPPER(kodepelmuat) LIKE UPPER(?)', [$request->pelabuhan_muat . '%']);
+            });
         }
         
         if ($request->filled('pelabuhan_transit')) {
-            $subquery = DB::table('customs.bc20_data')
-                ->select('idheader')
-                ->whereRaw('UPPER(kodepeltransit) LIKE UPPER(?)', [$request->pelabuhan_transit . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_data')
+                  ->whereColumn('bc20_data.idheader', 'bc20_header.idheader')
+                  ->whereRaw('UPPER(kodepeltransit) LIKE UPPER(?)', [$request->pelabuhan_transit . '%']);
+            });
         }
         
         if ($request->filled('kode_tps')) {
-            $subquery = DB::table('customs.bc20_data')
-                ->select('idheader')
-                ->whereRaw('UPPER(kodetps) LIKE UPPER(?)', ['%' . $request->kode_tps . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_data')
+                  ->whereColumn('bc20_data.idheader', 'bc20_header.idheader')
+                  ->whereRaw('UPPER(kodetps) LIKE UPPER(?)', ['%' . $request->kode_tps . '%']);
+            });
         }
         
         if ($request->filled('nama_pengangkut')) {
-            $subquery = DB::table('customs.bc20_pengangkut')
-                ->select('idheader')
-                ->whereRaw('UPPER(namapengangkut) LIKE UPPER(?)', ['%' . $request->nama_pengangkut . '%']);
-            $query->whereIn('idheader', $subquery);
+            $query->whereExists(function ($q) use ($request) {
+                $q->select(DB::raw(1))
+                  ->from('customs.bc20_pengangkut')
+                  ->whereColumn('bc20_pengangkut.idheader', 'bc20_header.idheader')
+                  ->whereRaw('UPPER(namapengangkut) LIKE UPPER(?)', ['%' . $request->nama_pengangkut . '%']);
+            });
         }
     }
 
@@ -294,23 +318,40 @@ class CustomsDataController extends Controller
      */
     private function loadDisplayBarang(array $headerIds)
     {
-        return DB::select("
-            SELECT 
-                idheader,
-                COUNT(*) as barang_count,
-                MIN(postarif) FILTER (WHERE rn = 1) as first_hscode,
-                MIN(uraian) FILTER (WHERE rn = 1) as first_uraian
-            FROM (
-                SELECT 
-                    idheader, 
-                    postarif, 
-                    uraian,
-                    ROW_NUMBER() OVER (PARTITION BY idheader ORDER BY seribarang) as rn
-                FROM customs.bc20_barang 
-                WHERE idheader = ANY(?)
-            ) ranked
-            GROUP BY idheader
-        ", [$headerIds]);
+        if (empty($headerIds)) {
+            return [];
+        }
+
+        // PostgreSQL-optimized: use DISTINCT ON for first item + COUNT aggregation
+        $barangCounts = DB::table('customs.bc20_barang')
+            ->select('idheader', DB::raw('COUNT(*) as barang_count'))
+            ->whereIn('idheader', $headerIds)
+            ->groupBy('idheader')
+            ->pluck('barang_count', 'idheader');
+
+        // DISTINCT ON picks the lowest seribarang per idheader efficiently in Postgres
+        $placeholders = implode(',', array_fill(0, count($headerIds), '?'));
+        $firstRows = DB::select(
+            "SELECT DISTINCT ON (idheader) idheader, postarif, uraian
+             FROM customs.bc20_barang
+             WHERE idheader IN ($placeholders)
+             ORDER BY idheader, seribarang ASC",
+            $headerIds
+        );
+        $firstBarang = collect($firstRows)->keyBy('idheader');
+
+        $results = [];
+        foreach ($headerIds as $id) {
+            $firstItem = $firstBarang->get($id);
+            $results[] = (object) [
+                'idheader' => $id,
+                'barang_count' => $barangCounts[$id] ?? 0,
+                'first_hscode' => $firstItem->postarif ?? null,
+                'first_uraian' => $firstItem->uraian ?? null,
+            ];
+        }
+
+        return $results;
     }
 
     /**
