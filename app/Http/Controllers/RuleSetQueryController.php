@@ -564,6 +564,8 @@ class RuleSetQueryController extends Controller
         
         Log::info("RULESET_DEBUG: Processing calculated field '{$field}' with operator '{$operator}' and value: " . json_encode($value));
         
+        $calculatedExpression = null;
+        
         if ($field === 'calculated.gross_weight_per_teus') {
             // Define the calculated field expression
             $calculatedExpression = '(
@@ -609,6 +611,16 @@ class RuleSetQueryController extends Controller
                 FROM customs.bc20_pungutan bp_calc
                 WHERE bp_calc.idheader = bc20_header.idheader
             )';
+        } else {
+            // Unknown calculated field - log warning and skip
+            Log::warning("RULESET_DEBUG: Unknown calculated field '{$field}' - skipping");
+            return;
+        }
+        
+        // Ensure we have a valid calculated expression
+        if (!$calculatedExpression) {
+            Log::error("RULESET_DEBUG: No calculated expression defined for field '{$field}'");
+            return;
         }
             
         // Apply the operator directly using whereRaw (common for all calculated fields)
@@ -668,7 +680,8 @@ class RuleSetQueryController extends Controller
     }
 
     /**
-     * Execute a RuleSet query with advanced query builder support.
+     * Execute a RuleSet query with advanced query builder support - OPTIMIZED VERSION.
+     * Uses two-phase approach: fast header query + lazy loading for display data.
      */
     public function executeQuery(Request $request): JsonResponse
     {
@@ -681,140 +694,461 @@ class RuleSetQueryController extends Controller
             'sort_direction' => 'nullable|in:asc,desc',
         ]);
 
-        $query = BC20Header::query()
+        // PHASE 1: Fast header-only query with filtering and pagination
+        $headerQuery = BC20Header::query()
             ->select([
                 'bc20_header.idheader',
                 'bc20_header.nomordaftar',
                 'bc20_header.tanggaldaftar',
                 'bc20_header.kodejalur'
-            ])
-            ->with([
-                'entitas' => function($query) {
-                    $query->select('idheader', 'kodeentitas', 'namaentitas')
-                          ->whereIn('kodeentitas', ['1', '4', '10']);
-                },
-                'barang' => function($query) {
-                    $query->select('idheader', 'seribarang', 'postarif', 'uraian')
-                          ->orderBy('seribarang', 'asc')
-                          ->limit(1);
-                }
-            ])
-            // LEFT JOIN to calculate kontainer count and TEUS
-            ->leftJoin(
-                DB::raw('(
-                    SELECT 
-                        bh.idheader,
-                        COUNT(bk.nomorkontainer) AS kontainer,
-                        SUM(
-                            CASE bk.kodeukurankontainer
-                                WHEN \'20\' THEN 1.0
-                                WHEN \'40\' THEN 2.0
-                                WHEN \'45\' THEN 2.25
-                                WHEN \'60\' THEN 3.0
-                                ELSE 0.0
-                            END
-                        ) AS teus
-                    FROM customs.bc20_kontainer bk
-                    JOIN customs.bc20_header bh ON bk.idheader = bh.idheader
-                    GROUP BY bh.idheader
-                ) as kontainer_agg'),
-                'bc20_header.idheader', '=', 'kontainer_agg.idheader'
-            )
-            // LEFT JOIN to calculate barang count
-            ->leftJoin(
-                DB::raw('(
-                    SELECT 
-                        bh.idheader,
-                        COUNT(bb.idbarang) AS barang_count
-                    FROM customs.bc20_barang bb
-                    JOIN customs.bc20_header bh ON bb.idheader = bh.idheader
-                    GROUP BY bh.idheader
-                ) as barang_agg'),
-                'bc20_header.idheader', '=', 'barang_agg.idheader'
-            )
-            ->addSelect([
-                'kontainer_agg.kontainer',
-                'kontainer_agg.teus',
-                'barang_agg.barang_count as barang_total'
             ]);
 
-        // Apply the JSON query if provided
+        // Apply the optimized JSON query if provided
         if ($request->filled('query_json')) {
-            Log::info('=== RULESET QUERY BUILDER ACTIVATED ===');
+            Log::info('=== OPTIMIZED RULESET QUERY BUILDER ACTIVATED ===');
             Log::info('Query JSON: ' . $request->query_json);
             
             $queryData = json_decode($request->query_json, true);
-            $this->applyQueryBuilderJson($query, $queryData);
+            $this->applyOptimizedQueryBuilderJson($headerQuery, $queryData);
             
-            Log::info('DEBUG: Generated SQL: ' . $query->toSql());
-            Log::info('DEBUG: Query bindings: ' . json_encode($query->getBindings()));
+            Log::info('DEBUG: Generated SQL: ' . $headerQuery->toSql());
+            Log::info('DEBUG: Query bindings: ' . json_encode($headerQuery->getBindings()));
         } else {
             Log::info('=== RULESET FALLBACK: No query_json provided ===');
             // Return empty result set if no query provided
-            $query->whereRaw('1 = 0'); // This will return no results
+            $headerQuery->whereRaw('1 = 0'); // This will return no results
         }
 
-        // Apply sorting
+        // Apply header-only sorting (fast - no JOINs)
+        $this->applyRulesetHeaderSorting($headerQuery, $request);
+        
+        // PHASE 1: Execute fast header query with pagination
+        $perPage = $request->get('per_page', 20);
+        $headerResults = $headerQuery->paginate($perPage);
+        
+        // If no results, return early
+        if ($headerResults->isEmpty()) {
+            return response()->json($headerResults);
+        }
+        
+        // Extract header IDs from paginated results
+        $headerIds = $headerResults->pluck('idheader')->toArray();
+        
+        // PHASE 2: Lazy load display data only for visible results
+        $displayData = $this->loadRulesetDisplayData($headerIds);
+        
+        // Transform paginated results with lazy-loaded data
+        $headerResults->getCollection()->transform(function ($item) use ($displayData) {
+            $id = $item->idheader;
+            
+            // Add display data from lazy-loaded results
+            $item->namaimportir = $displayData['entitas'][$id]['importir'] ?? null;
+            $item->namappjk = $displayData['entitas'][$id]['ppjk'] ?? null;
+            $item->namapenjual = $displayData['entitas'][$id]['penjual'] ?? null;
+            $item->kontainer = $displayData['kontainer'][$id]['count'] ?? 0;
+            $item->teus = $displayData['kontainer'][$id]['teus'] ?? 0.0;
+            $item->barang = $displayData['barang'][$id]['count'] ?? 0;
+            $item->hscode = $displayData['barang'][$id]['first_hscode'] ?? null;
+            $item->uraianbarang = $displayData['barang'][$id]['first_uraian'] ?? null;
+            
+            return $item;
+        });
+
+        return response()->json($headerResults);
+    }
+    
+    /**
+     * Apply optimized query builder JSON using EXISTS subqueries instead of whereHas.
+     */
+    private function applyOptimizedQueryBuilderJson($builder, array $group, $parentCombinator = 'and')
+    {
+        $combinator = $group['combinator'] ?? 'and';
+        $rules = $group['rules'] ?? [];
+
+        $methodGroup = $parentCombinator === 'or' ? 'orWhere' : 'where';
+
+        $builder->$methodGroup(function($q) use ($rules, $combinator) {
+            foreach ($rules as $ruleIndex => $rule) {
+                if (isset($rule['rules'])) {
+                    // Nested group
+                    $this->applyOptimizedQueryBuilderJson($q, $rule, $combinator);
+                    continue;
+                }
+
+                $field = $rule['field'] ?? '';
+                $operator = $rule['operator'] ?? '=';
+                $value = $rule['value'] ?? null;
+
+                // Skip if no value provided (except for null/notNull operators)
+                if (($value === null || $value === '') && !in_array($operator, ['null', 'notNull', 'isEmpty', 'isNotEmpty'])) {
+                    continue;
+                }
+
+                $isOr = ($combinator === 'or');
+                $whereMethod = $isOr ? 'orWhere' : 'where';
+
+                // Apply optimized field handling with EXISTS subqueries
+                $this->applyOptimizedFieldFilter($q, $field, $operator, $value, $whereMethod, $isOr);
+            }
+        });
+    }
+    
+    /**
+     * Apply optimized field filters using EXISTS subqueries (faster than whereHas).
+     * COMPREHENSIVE VERSION - handles ALL possible field types correctly.
+     */
+    private function applyOptimizedFieldFilter($q, $field, $operator, $value, $whereMethod, $isOr)
+    {
+        // Define data table fields that should use EXISTS subqueries instead of direct field access
+        $dataTableFields = [
+            'kodepelmuat', 'namapelabuhanmuat', 'kodepeltransit', 'namapelabuhantransit', 
+            'kodetps', 'namatpswajib', 'kodekantor', 'namakantorpendek', 'kodevaluta',
+            'netto', 'bruto', 'cif', 'ndpbm', 'nilaipabean', 'fob', 'freight', 'asuransi', 'volume',
+            'tanggaltiba', 'nomorbc11', 'tanggalbc11', 'posbc11', 'subposbc11'
+        ];
+        
+        // PRIORITY ORDER MATTERS - Most specific patterns first!
+        if ($field === 'tanggaldaftar') {
+            $this->handleTanggalDaftarField($q, $operator, $value, $whereMethod, $isOr);
+        } elseif (strpos($field, 'calculated.') === 0) {
+            // Handle calculated fields first (before checking other patterns)
+            $this->handleCalculatedField($q, $field, $operator, $value, $isOr);
+        } elseif (strpos($field, 'importir.') === 0) {
+            $this->applyOptimizedEntitasFilter($q, $field, $operator, $value, '1', $isOr);
+        } elseif (strpos($field, 'ppjk.') === 0) {
+            $this->applyOptimizedEntitasFilter($q, $field, $operator, $value, '4', $isOr);
+        } elseif (strpos($field, 'penjual.') === 0) {
+            $this->applyOptimizedEntitasFilter($q, $field, $operator, $value, '10', $isOr);
+        } elseif (strpos($field, 'pengirim.') === 0) {
+            $this->applyOptimizedEntitasFilter($q, $field, $operator, $value, '9', $isOr);
+        } elseif (strpos($field, 'pemilik.') === 0) {
+            $this->applyOptimizedEntitasFilter($q, $field, $operator, $value, '7', $isOr);
+        } elseif (strpos($field, 'barang.') === 0) {
+            $this->applyOptimizedBarangFilter($q, $field, $operator, $value, $isOr);
+        } elseif (strpos($field, 'kontainer.') === 0) {
+            $this->applyOptimizedKontainerFilter($q, $field, $operator, $value, $isOr);
+        } elseif (strpos($field, 'data.') === 0) {
+            $this->applyOptimizedDataFilter($q, $field, $operator, $value, $isOr);
+        } elseif (strpos($field, 'pengangkut.') === 0) {
+            $this->applyOptimizedPengangkutFilter($q, $field, $operator, $value, $isOr);
+        } elseif (strpos($field, 'dokumen.') === 0) {
+            $this->applyOptimizedDokumenFilter($q, $field, $operator, $value, $isOr);
+        } elseif (strpos($field, 'pungutan.') === 0) {
+            $this->applyOptimizedPungutanFilter($q, $field, $operator, $value, $isOr);
+        } elseif (strpos($field, 'kemasan.') === 0) {
+            $this->applyOptimizedKemasanFilter($q, $field, $operator, $value, $isOr);
+        } elseif (in_array($field, $dataTableFields)) {
+            // Direct data table field (without prefix) - treat as data.field
+            $this->applyOptimizedDataFilter($q, 'data.' . $field, $operator, $value, $isOr);
+        } elseif (in_array($field, ['nomordaftar', 'kodejalur', 'nomoraju'])) {
+            // Header table fields
+            $fullFieldName = 'bc20_header.' . $field;
+            $textFields = [$fullFieldName];
+            $this->applyGenericFieldOperator($q, $fullFieldName, $operator, $value, $textFields, []);
+        } else {
+            // Fallback: Handle as direct header field
+            $this->handleHeaderField($q, $field, $operator, $value, $whereMethod);
+        }
+    }
+    
+    /**
+     * Apply optimized entitas filter using EXISTS (faster than whereHas).
+     */
+    private function applyOptimizedEntitasFilter($q, $field, $operator, $value, $kodeentitas, $isOr)
+    {
+        $existsMethod = $isOr ? 'orWhereExists' : 'whereExists';
+        $subField = preg_replace('/^(importir|ppjk|penjual|pengirim|pemilik)\./', '', $field);
+        
+        $q->$existsMethod(function ($subQ) use ($kodeentitas, $subField, $operator, $value) {
+            $subQ->select(DB::raw(1))
+                 ->from('customs.bc20_entitas')
+                 ->whereColumn('bc20_entitas.idheader', 'bc20_header.idheader')
+                 ->where('kodeentitas', $kodeentitas);
+            
+            $textFields = ['namaentitas', 'alamatentitas', 'namanegara', 'kodenegara'];
+            $this->applyGenericFieldOperator($subQ, $subField, $operator, $value, $textFields, []);
+        });
+    }
+    
+    /**
+     * Apply optimized barang filter using EXISTS (faster than whereHas).
+     */
+    private function applyOptimizedBarangFilter($q, $field, $operator, $value, $isOr)
+    {
+        $existsMethod = $isOr ? 'orWhereExists' : 'whereExists';
+        $subField = str_replace('barang.', '', $field);
+        
+        $q->$existsMethod(function ($subQ) use ($subField, $operator, $value) {
+            $subQ->select(DB::raw(1))
+                 ->from('customs.bc20_barang')
+                 ->whereColumn('bc20_barang.idheader', 'bc20_header.idheader');
+            
+            $textFields = ['postarif', 'uraian', 'kodebarang', 'kodesatuanbarang', 'namasatuanbarang'];
+            $numericFields = ['jumlahsatuan', 'cif', 'fob', 'freight', 'asuransi', 'netto', 'bruto', 'volume', 'seribarang', 'jumlahkemasan'];
+            $this->applyGenericFieldOperator($subQ, $subField, $operator, $value, $textFields, $numericFields);
+        });
+    }
+    
+    /**
+     * Apply optimized kontainer filter using EXISTS (faster than whereHas).
+     */
+    private function applyOptimizedKontainerFilter($q, $field, $operator, $value, $isOr)
+    {
+        $existsMethod = $isOr ? 'orWhereExists' : 'whereExists';
+        $subField = str_replace('kontainer.', '', $field);
+        
+        $q->$existsMethod(function ($subQ) use ($subField, $operator, $value) {
+            $subQ->select(DB::raw(1))
+                 ->from('customs.bc20_kontainer')
+                 ->whereColumn('bc20_kontainer.idheader', 'bc20_header.idheader');
+            
+            $textFields = ['nomorkontainer', 'namaukurankontainer', 'namajeniskontainer'];
+            $numericFields = ['serikontainer'];
+            $this->applyGenericFieldOperator($subQ, $subField, $operator, $value, $textFields, $numericFields);
+        });
+    }
+    
+    /**
+     * Apply optimized data filter using EXISTS (faster than whereHas).
+     */
+    private function applyOptimizedDataFilter($q, $field, $operator, $value, $isOr)
+    {
+        $existsMethod = $isOr ? 'orWhereExists' : 'whereExists';
+        $subField = str_replace('data.', '', $field);
+        
+        $q->$existsMethod(function ($subQ) use ($subField, $operator, $value) {
+            $subQ->select(DB::raw(1))
+                 ->from('customs.bc20_data')
+                 ->whereColumn('bc20_data.idheader', 'bc20_header.idheader');
+            
+            $textFields = ['kodepelmuat', 'namapelabuhanmuat', 'kodepeltransit', 'namapelabuhantransit', 'kodetps', 'namatpswajib', 'kodekantor', 'namakantorpendek', 'kodevaluta'];
+            $numericFields = ['netto', 'bruto', 'cif', 'ndpbm', 'nilaipabean', 'fob', 'freight', 'asuransi', 'volume'];
+            $this->applyGenericFieldOperator($subQ, $subField, $operator, $value, $textFields, $numericFields);
+        });
+    }
+    
+    /**
+     * Apply optimized pengangkut filter using EXISTS (faster than whereHas).
+     */
+    private function applyOptimizedPengangkutFilter($q, $field, $operator, $value, $isOr)
+    {
+        $existsMethod = $isOr ? 'orWhereExists' : 'whereExists';
+        $subField = str_replace('pengangkut.', '', $field);
+        
+        $q->$existsMethod(function ($subQ) use ($subField, $operator, $value) {
+            $subQ->select(DB::raw(1))
+                 ->from('customs.bc20_pengangkut')
+                 ->whereColumn('bc20_pengangkut.idheader', 'bc20_header.idheader');
+            
+            $textFields = ['namapengangkut', 'nomorpengangkut', 'kodebendera', 'namanegara'];
+            $this->applyGenericFieldOperator($subQ, $subField, $operator, $value, $textFields, []);
+        });
+    }
+    
+    /**
+     * Apply optimized dokumen filter using EXISTS (faster than whereHas).
+     */
+    private function applyOptimizedDokumenFilter($q, $field, $operator, $value, $isOr)
+    {
+        $existsMethod = $isOr ? 'orWhereExists' : 'whereExists';
+        $subField = str_replace('dokumen.', '', $field);
+        
+        $q->$existsMethod(function ($subQ) use ($subField, $operator, $value) {
+            $subQ->select(DB::raw(1))
+                 ->from('customs.bc20_dokumen')
+                 ->whereColumn('bc20_dokumen.idheader', 'bc20_header.idheader');
+            
+            $textFields = ['namadokumen', 'nomordokumen', 'namafasilitas', 'kodefasilitas'];
+            $numericFields = ['seridokumen'];
+            $this->applyGenericFieldOperator($subQ, $subField, $operator, $value, $textFields, $numericFields);
+        });
+    }
+    
+    /**
+     * Apply optimized pungutan filter using EXISTS (faster than whereHas).
+     */
+    private function applyOptimizedPungutanFilter($q, $field, $operator, $value, $isOr)
+    {
+        $existsMethod = $isOr ? 'orWhereExists' : 'whereExists';
+        $subField = str_replace('pungutan.', '', $field);
+        
+        $q->$existsMethod(function ($subQ) use ($subField, $operator, $value) {
+            $subQ->select(DB::raw(1))
+                 ->from('customs.bc20_pungutan')
+                 ->whereColumn('bc20_pungutan.idheader', 'bc20_header.idheader');
+            
+            $textFields = ['keterangan'];
+            $numericFields = ['dibayar'];
+            $this->applyGenericFieldOperator($subQ, $subField, $operator, $value, $textFields, $numericFields);
+        });
+    }
+    
+    /**
+     * Apply optimized kemasan filter using EXISTS (faster than whereHas).
+     */
+    private function applyOptimizedKemasanFilter($q, $field, $operator, $value, $isOr)
+    {
+        $existsMethod = $isOr ? 'orWhereExists' : 'whereExists';
+        $subField = str_replace('kemasan.', '', $field);
+        
+        $q->$existsMethod(function ($subQ) use ($subField, $operator, $value) {
+            $subQ->select(DB::raw(1))
+                 ->from('customs.bc20_kemasan')
+                 ->whereColumn('bc20_kemasan.idheader', 'bc20_header.idheader');
+            
+            $textFields = ['kodejeniskemasan', 'namakemasan'];
+            $numericFields = ['jumlahkemasan', 'serikemasan'];
+            $this->applyGenericFieldOperator($subQ, $subField, $operator, $value, $textFields, $numericFields);
+        });
+    }
+    
+    /**
+     * Apply header-only sorting (fast - no JOINs on main table).
+     */
+    private function applyRulesetHeaderSorting($query, Request $request)
+    {
         $sortBy = $request->get('sort_by', 'nomordaftar');
         $sortDirection = $request->get('sort_direction', 'asc');
         
+        // Only allow sorting by header columns for optimal performance
         switch ($sortBy) {
             case 'nomordaftar':
             case 'tanggaldaftar':
             case 'kodejalur':
                 $query->orderBy('bc20_header.' . $sortBy, $sortDirection);
                 break;
-            case 'kontainer':
-                $query->orderBy('kontainer_agg.kontainer', $sortDirection);
-                break;
-            case 'teus':
-                $query->orderBy('kontainer_agg.teus', $sortDirection);
-                break;
-            case 'barang':
-                $query->orderBy('barang_total', $sortDirection);
-                break;
             default:
+                // Default sort by PIB ascending
                 $query->orderBy('bc20_header.nomordaftar', 'asc');
         }
-
-        // Paginate results
-        $perPage = $request->get('per_page', 20);
-        $data = $query->paginate($perPage);
-
-        // Transform the data to include only the fields needed for table display
-        $data->getCollection()->transform(function ($item) {
-            // Get entity data by code
-            $importir = $item->entitas->where('kodeentitas', '1')->first();
-            $ppjk = $item->entitas->where('kodeentitas', '4')->first();
-            $penjual = $item->entitas->where('kodeentitas', '10')->first();
+    }
+    
+    /**
+     * Lazy load display data for visible headers only (PHASE 2) - RuleSet version.
+     */
+    private function loadRulesetDisplayData(array $headerIds)
+    {
+        // Load entity data using optimized queries
+        $entitasData = $this->loadDisplayEntitas($headerIds);
+        
+        // Load kontainer data using optimized queries
+        $kontainerData = $this->loadDisplayKontainer($headerIds);
+        
+        // Load barang data using optimized queries  
+        $barangData = $this->loadDisplayBarang($headerIds);
+        
+        return [
+            'entitas' => $entitasData,
+            'kontainer' => $kontainerData,
+            'barang' => $barangData
+        ];
+    }
+    
+    /**
+     * Load entity display data (importir, ppjk, penjual names) for visible rows only.
+     */
+    private function loadDisplayEntitas(array $headerIds)
+    {
+        // Use PostgreSQL-optimized DISTINCT ON for fastest results
+        $results = DB::select("
+            SELECT DISTINCT ON (idheader, kodeentitas) 
+                   idheader, kodeentitas, namaentitas
+            FROM customs.bc20_entitas 
+            WHERE idheader = ANY(?) 
+            AND kodeentitas IN ('1', '4', '10')
+            ORDER BY idheader, kodeentitas, namaentitas
+        ", ['{' . implode(',', $headerIds) . '}']);
+        
+        $entitasData = [];
+        foreach ($results as $row) {
+            $headerId = $row->idheader;
+            if (!isset($entitasData[$headerId])) {
+                $entitasData[$headerId] = [];
+            }
             
-            // Get barang count from aggregation (using barang_total field from SQL)
-            $barangCount = $item->barang_total ?? 0;
-            
-            // Get first barang item from relationship (use the loaded relationship)
-            $firstBarang = $item->barang && $item->barang->count() > 0 ? $item->barang->first() : null;
-            
-            // Extract data we need from the relationship before removing it
-            $hscode = $firstBarang ? $firstBarang->postarif : null;
-            $uraianbarang = $firstBarang ? $firstBarang->uraian : null;
-            
-            // Remove the relationships and temporary fields from the response
-            unset($item->entitas, $item->barang, $item->barang_total);
-            
-            // Add only the fields needed for table display (12 fields total)
-            $item->namaimportir = $importir ? $importir->namaentitas : null;
-            $item->namappjk = $ppjk ? $ppjk->namaentitas : null;
-            $item->namapenjual = $penjual ? $penjual->namaentitas : null;
-            $item->kontainer = $item->kontainer ? (int) $item->kontainer : 0;
-            $item->teus = $item->teus ? (float) $item->teus : 0.0;
-            $item->barang = (int) $barangCount;
-            $item->hscode = $hscode;
-            $item->uraianbarang = $uraianbarang;
-            
-            return $item;
-        });
-
-        return response()->json($data);
+            switch ($row->kodeentitas) {
+                case '1':
+                    $entitasData[$headerId]['importir'] = $row->namaentitas;
+                    break;
+                case '4':
+                    $entitasData[$headerId]['ppjk'] = $row->namaentitas;
+                    break;
+                case '10':
+                    $entitasData[$headerId]['penjual'] = $row->namaentitas;
+                    break;
+            }
+        }
+        
+        return $entitasData;
+    }
+    
+    /**
+     * Load barang display data (first HS code, description, count) for visible rows only.
+     */
+    private function loadDisplayBarang(array $headerIds)
+    {
+        // PostgreSQL-optimized: use DISTINCT ON for first item + COUNT aggregation
+        $firstBarang = DB::select("
+            SELECT DISTINCT ON (idheader) 
+                   idheader, postarif, uraian
+            FROM customs.bc20_barang 
+            WHERE idheader = ANY(?) 
+            ORDER BY idheader, seribarang ASC
+        ", ['{' . implode(',', $headerIds) . '}']);
+        
+        $barangCounts = DB::table('customs.bc20_barang')
+            ->select('idheader', DB::raw('COUNT(*) as barang_count'))
+            ->whereIn('idheader', $headerIds)
+            ->groupBy('idheader')
+            ->pluck('barang_count', 'idheader');
+        
+        $barangData = [];
+        foreach ($headerIds as $id) {
+            $firstItem = collect($firstBarang)->where('idheader', $id)->first();
+            $barangData[$id] = [
+                'count' => $barangCounts[$id] ?? 0,
+                'first_hscode' => $firstItem->postarif ?? null,
+                'first_uraian' => $firstItem->uraian ?? null,
+            ];
+        }
+        
+        return $barangData;
+    }
+    
+    /**
+     * Load kontainer display data (count, TEUS sum) for visible rows only.
+     */
+    private function loadDisplayKontainer(array $headerIds)
+    {
+        $kontainerData = DB::table('customs.bc20_kontainer')
+            ->select([
+                'idheader',
+                DB::raw('COUNT(*) as kontainer_count'),
+                DB::raw('COALESCE(SUM(
+                    CASE kodeukurankontainer
+                        WHEN \'20\' THEN 1.0
+                        WHEN \'40\' THEN 2.0
+                        WHEN \'45\' THEN 2.25
+                        WHEN \'60\' THEN 3.0
+                        ELSE 0.0
+                    END
+                ), 0) as teus_sum')
+            ])
+            ->whereIn('idheader', $headerIds)
+            ->groupBy('idheader')
+            ->get()
+            ->keyBy('idheader');
+        
+        $results = [];
+        foreach ($headerIds as $id) {
+            $data = $kontainerData->get($id);
+            $results[$id] = [
+                'count' => $data ? (int)$data->kontainer_count : 0,
+                'teus' => $data ? (float)$data->teus_sum : 0.0,
+            ];
+        }
+        
+        return $results;
     }
 
     /**
