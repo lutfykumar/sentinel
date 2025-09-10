@@ -503,13 +503,67 @@ class CustomsDataController extends Controller
             }
 
             // Basic filters
-        if ($request->filled('nomordaftar')) {
-            $query->byRegistrationNumber($request->nomordaftar);
+            if ($request->filled('nomordaftar')) {
+                $query->byRegistrationNumber($request->nomordaftar);
+            }
+
+            if ($request->filled('kodejalur')) {
+                $query->byCustomsRoute($request->kodejalur);
+            }
+            
+            // Apply related filters
+            $this->applyRelatedFiltersAsSubqueries($query, $request);
         }
 
-        if ($request->filled('kodejalur')) {
-            $query->byCustomsRoute($request->kodejalur);
+        // Apply sorting
+        $sortBy = $request->get('sort_by', 'nomordaftar');
+        $sortDirection = $request->get('sort_direction', 'asc');
+        
+        // Handle all sorting in the backend database for optimal performance
+        switch ($sortBy) {
+            case 'nomordaftar':
+            case 'tanggaldaftar':
+            case 'kodejalur':
+                $query->orderBy('bc20_header.' . $sortBy, $sortDirection);
+                break;
+            default:
+                // Default sort by PIB ascending
+                $query->orderBy('bc20_header.nomordaftar', 'asc');
         }
+
+        // Paginate results
+        $perPage = $request->get('per_page', 20);
+        $data = $query->paginate($perPage);
+
+        // Transform the data to include relationship data
+        $data->getCollection()->transform(function ($item) {
+            // Get entity data by code
+            $importir = $item->entitas->where('kodeentitas', '1')->first();
+            $ppjk = $item->entitas->where('kodeentitas', '4')->first();
+            $penjual = $item->entitas->where('kodeentitas', '10')->first();
+            
+            // Get first barang item
+            $firstBarang = $item->barang->first();
+            
+            // Add the related data as attributes
+            $item->namaimportir = $importir ? $importir->namaentitas : null;
+            $item->namappjk = $ppjk ? $ppjk->namaentitas : null;
+            $item->namapenjual = $penjual ? $penjual->namaentitas : null;
+            $item->hscode = $firstBarang ? $firstBarang->postarif : null;
+            $item->uraianbarang = $firstBarang ? $firstBarang->uraian : null;
+            
+            // Add kontainer and barang counts
+            $item->kontainer_count = $item->kontainer ?? 0;
+            $item->teus_sum = $item->teus ?? 0;
+            $item->barang_count = $item->barang_total ?? 0;
+            
+            // Remove the relationships from the response to keep it clean
+            unset($item->entitas, $item->barang);
+            
+            return $item;
+        });
+
+        return response()->json($data);
     }
 
     /**
@@ -633,137 +687,6 @@ class CustomsDataController extends Controller
                   ->whereRaw('UPPER(namapengangkut) LIKE UPPER(?)', ['%' . $request->nama_pengangkut . '%']);
             });
         }
-        } // end else branch for legacy filters
-
-    /**
-     * Apply sorting restricted to header columns only (fast).
-     */
-    private function applyHeaderSortingOnly($query, Request $request)
-    {
-        $sortBy = $request->get('sort_by', 'nomordaftar');
-        $sortDirection = $request->get('sort_direction', 'asc');
-
-        // Handle all sorting in the backend database for optimal performance
-        switch ($sortBy) {
-            case 'nomordaftar':
-            case 'tanggaldaftar':
-            case 'kodejalur':
-                $query->orderBy('bc20_header.' . $sortBy, $sortDirection);
-                break;
-            case 'namaimportir':
-                $query->leftJoin('customs.bc20_entitas as sort_importir', function($join) {
-                    $join->on('bc20_header.idheader', '=', 'sort_importir.idheader')
-                         ->where('sort_importir.kodeentitas', '=', '1');
-                })
-                ->addSelect('sort_importir.namaentitas as sort_importir_name')
-                ->orderBy('sort_importir.namaentitas', $sortDirection);
-                break;
-            case 'namappjk':
-                $query->leftJoin('customs.bc20_entitas as sort_ppjk', function($join) {
-                    $join->on('bc20_header.idheader', '=', 'sort_ppjk.idheader')
-                         ->where('sort_ppjk.kodeentitas', '=', '4');
-                })
-                ->addSelect('sort_ppjk.namaentitas as sort_ppjk_name')
-                ->orderBy('sort_ppjk.namaentitas', $sortDirection);
-                break;
-            case 'namapenjual':
-                $query->leftJoin('customs.bc20_entitas as sort_penjual', function($join) {
-                    $join->on('bc20_header.idheader', '=', 'sort_penjual.idheader')
-                         ->where('sort_penjual.kodeentitas', '=', '10');
-                })
-                ->addSelect('sort_penjual.namaentitas as sort_penjual_name')
-                ->orderBy('sort_penjual.namaentitas', $sortDirection);
-                break;
-            case 'kontainer':
-                $query->orderBy('kontainer_agg.kontainer', $sortDirection);
-                break;
-            case 'teus':
-                $query->orderBy('kontainer_agg.teus', $sortDirection);
-                break;
-            case 'barang':
-                $query->orderBy('barang_total', $sortDirection);
-                break;
-            case 'hscode':
-                $query->leftJoin('customs.bc20_barang as sort_barang_hs', function($join) {
-                    $join->on('bc20_header.idheader', '=', 'sort_barang_hs.idheader')
-                         ->where('sort_barang_hs.seribarang', '=', 1);
-                })
-                ->addSelect('sort_barang_hs.postarif as sort_hscode')
-                ->orderBy('sort_barang_hs.postarif', $sortDirection);
-                break;
-            case 'uraianbarang':
-                $query->leftJoin('customs.bc20_barang as sort_barang_uraian', function($join) {
-                    $join->on('bc20_header.idheader', '=', 'sort_barang_uraian.idheader')
-                         ->where('sort_barang_uraian.seribarang', '=', 1);
-                })
-                ->addSelect('sort_barang_uraian.uraian as sort_uraian')
-                ->orderBy('sort_barang_uraian.uraian', $sortDirection);
-                break;
-            default:
-                // Default sort by PIB ascending
-                $query->orderBy('bc20_header.nomordaftar', 'asc');
-        }
-
-        // PostgreSQL-optimized: use DISTINCT ON for first item + COUNT aggregation
-        $barangCounts = DB::table('customs.bc20_barang')
-            ->select('idheader', DB::raw('COUNT(*) as barang_count'))
-            ->whereIn('idheader', $headerIds)
-            ->groupBy('idheader')
-            ->pluck('barang_count', 'idheader');
-
-        // Transform the data to include only the fields needed for table display
-        $data->getCollection()->transform(function ($item) {
-            // Get entity data by code
-            $importir = $item->entitas->where('kodeentitas', '1')->first();
-            $ppjk = $item->entitas->where('kodeentitas', '4')->first();
-            $penjual = $item->entitas->where('kodeentitas', '10')->first();
-
-            // Get barang count from aggregation (using barang_total field)
-            $barangCount = $item->barang_total ?? 0;
-
-            // Ensure barangCount is a number, not a collection
-            if (is_object($barangCount) || is_array($barangCount)) {
-                $barangCount = 0;
-            }
-
-            // Get first barang item from relationship
-            $firstBarang = $item->barang && $item->barang->count() > 0 ? $item->barang->first() : null;
-
-            // Extract data we need from the relationship before removing it
-            $hscode = $firstBarang ? $firstBarang->postarif : null;
-            $uraianbarang = $firstBarang ? $firstBarang->uraian : null;
-
-            // Remove the relationships first to avoid conflicts
-            unset($item->entitas, $item->barang);
-
-            // Add only the fields needed for table display (12 fields total)
-            $item->namaimportir = $importir ? $importir->namaentitas : null;
-            $item->namappjk = $ppjk ? $ppjk->namaentitas : null;
-            $item->namapenjual = $penjual ? $penjual->namaentitas : null;
-            $item->kontainer = $item->kontainer ? (int) $item->kontainer : 0;
-            $item->teus = $item->teus ? (float) $item->teus : 0.0;
-            $item->barang = (int) $barangCount;
-            $item->hscode = $hscode;
-            $item->uraianbarang = $uraianbarang;
-
-            // Remove temporary fields from the response
-            unset($item->barang_total);
-
-            return $item;
-        });
-
-        $results = [];
-        foreach ($headerIds as $id) {
-            $firstItem = $firstBarang->get($id);
-            $results[] = (object) [
-                'idheader' => $id,
-                'barang_count' => $barangCounts[$id] ?? 0,
-                'first_hscode' => $firstItem->postarif ?? null,
-                'first_uraian' => $firstItem->uraian ?? null,
-            ];
-        }
-
-        return $results;
     }
 
     /**
