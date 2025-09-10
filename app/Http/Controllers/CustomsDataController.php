@@ -22,7 +22,7 @@ class CustomsDataController extends Controller
         } else {
             \Log::info("QUERY_DEBUG: Field '{$field}' < operator '{$operator}' < value " . json_encode($value));
         }
-        
+
         switch ($operator) {
             case '=':
             case 'equals':
@@ -109,7 +109,7 @@ class CustomsDataController extends Controller
                 }
         }
     }
-    
+
     /**
      * Parse between operator values from string to array.
      * Handles comma-separated values like "2025-05-01, 2025-05-02"
@@ -119,17 +119,17 @@ class CustomsDataController extends Controller
         if (is_array($value)) {
             return $value;
         }
-        
+
         if (is_string($value) && strpos($value, ',') !== false) {
             $parts = array_map('trim', explode(',', $value));
             if (count($parts) === 2) {
                 return $parts;
             }
         }
-        
+
         return null;
     }
-    
+
     /**
      * Apply react-querybuilder JSON to the Eloquent query, supporting AND/OR and nested relations.
      */
@@ -375,7 +375,7 @@ class CustomsDataController extends Controller
     }
 
     /**
-     * Get filtered customs data with pagination.
+     * Get filtered customs data with pagination - OPTIMIZED TWO-PHASE APPROACH.
      */
     public function getData(Request $request)
     {
@@ -397,12 +397,13 @@ class CustomsDataController extends Controller
             'nomorkontainer' => 'nullable|string|max:255',
             // Port and transport filters
             'pelabuhan_muat' => 'nullable|string|max:6',
-            'pelabuhan_transit' => 'nullable|string|max:6', 
+            'pelabuhan_transit' => 'nullable|string|max:6',
             'kode_tps' => 'nullable|string|max:255',
             'nama_pengangkut' => 'nullable|string|max:255',
             'page' => 'integer|min:1',
             'per_page' => 'integer|min:1|max:100',
-            'sort_by' => ['nullable', Rule::in(['nomordaftar', 'tanggaldaftar', 'kodejalur', 'namaimportir', 'namappjk', 'namapenjual', 'kontainer', 'teus', 'barang', 'hscode', 'uraianbarang'])],
+            // RESTRICTED: Only allow header column sorting
+            'sort_by' => ['nullable', Rule::in(['nomordaftar', 'tanggaldaftar', 'kodejalur'])],
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
             'query_json' => 'nullable|json',
             // Between operator support for legacy params
@@ -410,70 +411,74 @@ class CustomsDataController extends Controller
             'nomordaftar_not_between_max' => 'nullable|numeric',
         ]);
 
-        $query = BC20Header::query()
-            ->select([
-                'bc20_header.idheader',        // needed for relationships
-                'bc20_header.nomordaftar',     // PIB
-                'bc20_header.tanggaldaftar',   // Tanggal
-                'bc20_header.kodejalur'        // Jalur
-            ])
-            ->with([
-                'entitas' => function($query) {
-                    $query->select('idheader', 'kodeentitas', 'namaentitas')
-                          ->whereIn('kodeentitas', ['1', '4', '10']);
-                },
-                'barang' => function($query) {
-                    $query->select('idheader', 'seribarang', 'postarif', 'uraian')
-                          ->orderBy('seribarang', 'asc')
-                          ->limit(1);
-                }
-            ])
-            // LEFT JOIN to calculate kontainer count and TEUS
-            ->leftJoin(
-                DB::raw('(
-                    SELECT 
-                        bh.idheader,
-                        COUNT(bk.nomorkontainer) AS kontainer,
-                        SUM(
-                            CASE bk.kodeukurankontainer
-                                WHEN \'20\' THEN 1.0
-                                WHEN \'40\' THEN 2.0
-                                WHEN \'45\' THEN 2.25
-                                WHEN \'60\' THEN 3.0
-                                ELSE 0.0
-                            END
-                        ) AS teus
-                    FROM customs.bc20_kontainer bk
-                    JOIN customs.bc20_header bh ON bk.idheader = bh.idheader
-                    GROUP BY bh.idheader
-                ) as kontainer_agg'),
-                'bc20_header.idheader', '=', 'kontainer_agg.idheader'
-            )
-            // LEFT JOIN to calculate barang count
-            ->leftJoin(
-                DB::raw('(
-                    SELECT 
-                        bh.idheader,
-                        COUNT(bb.idbarang) AS barang_count
-                    FROM customs.bc20_barang bb
-                    JOIN customs.bc20_header bh ON bb.idheader = bh.idheader
-                    GROUP BY bh.idheader
-                ) as barang_agg'),
-                'bc20_header.idheader', '=', 'barang_agg.idheader'
-            )
-            ->addSelect([
-                'kontainer_agg.kontainer',
-                'kontainer_agg.teus',
-                'barang_agg.barang_count as barang_total'
-            ]);
+        // PHASE 1: Get headers with basic filters only (FAST)
+        $query = BC20Header::select([
+            'idheader',        // needed for relationships
+            'nomordaftar',     // PIB
+            'tanggaldaftar',   // Tanggal
+            'kodejalur'        // Jalur
+        ]);
 
-        // If complex query JSON is provided, apply it and skip default filters
-        if ($request->filled('query_json')) {
-            \Log::info('=== ADVANCED QUERY BUILDER ACTIVATED ===');
-            \Log::info('Query JSON: ' . $request->query_json);
-            $this->applyQueryBuilderJson($query, json_decode($request->query_json, true));
-            \Log::info('DEBUG: Generated SQL: ' . $query->toSql());
-            \Log::info('DEBUG: Query bindings: ' . json_encode($query->getBindings()));
+        // Apply header-level filters (indexed, fast)
+        $this->applyHeaderFilters($query, $request);
+
+        // Apply related filters as efficient subqueries (not expensive joins)
+        $this->applyRelatedFiltersAsSubqueries($query, $request);
+
+        // RESTRICTED SORTING: Only header columns allowed
+        $this->applyHeaderSortingOnly($query, $request);
+
+        // Paginate headers
+        $perPage = $request->get('per_page', 20);
+        $paginatedData = $query->paginate($perPage);
+        $headerIds = $paginatedData->pluck('idheader')->toArray();
+
+        // If no results, return early
+        if (empty($headerIds)) {
+            return response()->json($paginatedData);
+        }
+
+        // PHASE 2: Load ONLY display columns for visible rows (EFFICIENT)
+        $entitiesData = $this->loadDisplayEntities($headerIds);
+        $barangData = collect($this->loadDisplayBarang($headerIds))->keyBy('idheader');
+        $kontainerData = $this->loadDisplayKontainer($headerIds);
+
+        // Merge display data back into paginated results
+        $paginatedData->getCollection()->transform(function ($header) use ($entitiesData, $barangData, $kontainerData) {
+            $id = $header->idheader;
+
+            // Add entity display columns (Nama Perusahaan, Nama PPJK, Nama Penjual)
+            $entityRow = $entitiesData->get($id);
+            $header->namaimportir = $entityRow?->namaimportir ?? null;
+            $header->namappjk = $entityRow?->namappjk ?? null;
+            $header->namapenjual = $entityRow?->namapenjual ?? null;
+
+            // Add barang display columns (Barang count, HS, Uraian Barang)
+            $barangRow = $barangData->get($id);
+            $header->barang_count = $barangRow?->barang_count ?? 0;
+            $header->hscode = $barangRow?->first_hscode ?? null;
+            $header->uraianbarang = $barangRow?->first_uraian ?? null;
+
+            // Add kontainer display columns (Kontainer count, TEUS sum)
+            $kontainerRow = $kontainerData->get($id);
+            $header->kontainer_count = $kontainerRow?->kontainer_count ?? 0;
+            $header->teus_sum = $kontainerRow?->teus_sum ?? 0;
+
+            return $header;
+        });
+
+        return response()->json($paginatedData);
+    }
+
+    /**
+     * Apply header-level filters (fast, indexed filters only).
+     */
+    private function applyHeaderFilters($query, Request $request)
+    {
+        // Apply date range or default to today's date
+        if ($request->filled('start_date') && $request->filled('end_date')) {
+            // Use user-provided date range
+            $query->dateRange($request->start_date, $request->end_date);
         } else {
             // Apply filters or default to today's date
             if ($request->filled('start_date') && $request->filled('end_date')) {
@@ -481,7 +486,7 @@ class CustomsDataController extends Controller
                 $query->dateRange($request->start_date, $request->end_date);
             } else {
                 // Check if any meaningful filters are applied
-                $hasFilters = $request->filled('nomordaftar') || 
+                $hasFilters = $request->filled('nomordaftar') ||
                              $request->filled('kodejalur') ||
                              $request->filled('namaimportir') ||
                              $request->filled('namapenjual') ||
@@ -495,14 +500,14 @@ class CustomsDataController extends Controller
                              $request->filled('pelabuhan_transit') ||
                              $request->filled('kode_tps') ||
                              $request->filled('nama_pengangkut');
-                
+
                 if (!$hasFilters) {
                     // No meaningful filters applied, default to today's data
                     $query->whereDate('tanggaldaftar', now()->toDateString());
                 }
             }
 
-            // Basic filters
+        // Basic header filters (fast, indexed)
         if ($request->filled('nomordaftar')) {
             $query->byRegistrationNumber($request->nomordaftar);
         }
@@ -510,200 +515,184 @@ class CustomsDataController extends Controller
         if ($request->filled('kodejalur')) {
             $query->byCustomsRoute($request->kodejalur);
         }
-        
-        // Entity-based filters (require JOIN operations) - Case insensitive with UPPER()
-        if ($request->filled('namaimportir')) {
-            $query->whereHas('entitas', function($q) use ($request) {
-                $q->where('kodeentitas', '1')
-                  ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namaimportir . '%']);
-            });
-        }
-        
-        if ($request->filled('namapenjual')) {
-            $query->whereHas('entitas', function($q) use ($request) {
-                $q->where('kodeentitas', '10')
-                  ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namapenjual . '%']);
-            });
-        }
-        
-        if ($request->filled('namapengirim')) {
-            $query->whereHas('entitas', function($q) use ($request) {
-                $q->where('kodeentitas', '9')
-                  ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namapengirim . '%']);
-            });
-        }
-        
-        if ($request->filled('namappjk')) {
-            $query->whereHas('entitas', function($q) use ($request) {
-                $q->where('kodeentitas', '4')
-                  ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namappjk . '%']);
-            });
-        }
-        
-        if ($request->filled('negaraasal')) {
-            $query->whereHas('entitas', function($q) use ($request) {
-                $q->where('kodeentitas', '9')
-                  ->whereRaw('UPPER(kodenegara) LIKE UPPER(?)', ['%' . $request->negaraasal . '%']);
-            });
-        }
-        
-        // Goods-based filters - Case insensitive with UPPER()
-        if ($request->filled('uraianbarang')) {
-            $query->whereHas('barang', function($q) use ($request) {
-                $q->whereRaw('UPPER(uraian) LIKE UPPER(?)', ['%' . $request->uraianbarang . '%']);
-            });
-        }
-        
-        if ($request->filled('hscode')) {
-            $query->whereHas('barang', function($q) use ($request) {
-                $q->whereRaw('UPPER(postarif) LIKE UPPER(?)', [$request->hscode . '%']);
-            });
-        }
-        
-        // Container-based filter - Case insensitive with UPPER()
-        if ($request->filled('nomorkontainer')) {
-            $query->whereHas('kontainer', function($q) use ($request) {
-                $q->whereRaw('UPPER(nomorkontainer) LIKE UPPER(?)', [$request->nomorkontainer . '%']);
-            });
-        }
-        
-        // Port and transport filters
-        if ($request->filled('pelabuhan_muat')) {
-            $query->whereHas('data', function($q) use ($request) {
-                $q->whereRaw('UPPER(kodepelmuat) LIKE UPPER(?)', [$request->pelabuhan_muat . '%']);
-            });
-        }
-        
-        if ($request->filled('pelabuhan_transit')) {
-            $query->whereHas('data', function($q) use ($request) {
-                $q->whereRaw('UPPER(kodepeltransit) LIKE UPPER(?)', [$request->pelabuhan_transit . '%']);
-            });
-        }
-        
-        if ($request->filled('kode_tps')) {
-            $query->whereHas('data', function($q) use ($request) {
-                $q->whereRaw('UPPER(kodetps) LIKE UPPER(?)', ['%' . $request->kode_tps . '%']);
-            });
-        }
-        
-        if ($request->filled('nama_pengangkut')) {
-            $query->whereHas('pengangkut', function($q) use ($request) {
-                $q->whereRaw('UPPER(namapengangkut) LIKE UPPER(?)', ['%' . $request->nama_pengangkut . '%']);
-            });
-        }
-        } // end else branch for legacy filters
+    }
 
-        // Apply sorting
+    /**
+     * Apply related filters as efficient subqueries (not expensive joins).
+     */
+    private function applyRelatedFiltersAsSubqueries($query, Request $request)
+    {
+        // Entity-based filters using WHERE IN subqueries (much faster than whereHas)
+        if ($request->filled('namaimportir')) {
+            $subquery = DB::table('customs.bc20_entitas')
+                ->select('idheader')
+                ->where('kodeentitas', '1')
+                ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namaimportir . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        if ($request->filled('namappjk')) {
+            $subquery = DB::table('customs.bc20_entitas')
+                ->select('idheader')
+                ->where('kodeentitas', '4')
+                ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namappjk . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        if ($request->filled('namapenjual')) {
+            $subquery = DB::table('customs.bc20_entitas')
+                ->select('idheader')
+                ->where('kodeentitas', '10')
+                ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namapenjual . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        if ($request->filled('namapengirim')) {
+            $subquery = DB::table('customs.bc20_entitas')
+                ->select('idheader')
+                ->where('kodeentitas', '9')
+                ->whereRaw('UPPER(namaentitas) LIKE UPPER(?)', ['%' . $request->namapengirim . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        if ($request->filled('negaraasal')) {
+            $subquery = DB::table('customs.bc20_entitas')
+                ->select('idheader')
+                ->where('kodeentitas', '9')
+                ->whereRaw('UPPER(kodenegara) LIKE UPPER(?)', ['%' . $request->negaraasal . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        // Goods-based filters using subqueries
+        if ($request->filled('uraianbarang')) {
+            $subquery = DB::table('customs.bc20_barang')
+                ->select('idheader')
+                ->whereRaw('UPPER(uraian) LIKE UPPER(?)', ['%' . $request->uraianbarang . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        if ($request->filled('hscode')) {
+            $subquery = DB::table('customs.bc20_barang')
+                ->select('idheader')
+                ->whereRaw('UPPER(postarif) LIKE UPPER(?)', [$request->hscode . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        // Container-based filter using subquery
+        if ($request->filled('nomorkontainer')) {
+            $subquery = DB::table('customs.bc20_kontainer')
+                ->select('idheader')
+                ->whereRaw('UPPER(nomorkontainer) LIKE UPPER(?)', [$request->nomorkontainer . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        // Port and transport filters using subqueries
+        if ($request->filled('pelabuhan_muat')) {
+            $subquery = DB::table('customs.bc20_data')
+                ->select('idheader')
+                ->whereRaw('UPPER(kodepelmuat) LIKE UPPER(?)', [$request->pelabuhan_muat . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        if ($request->filled('pelabuhan_transit')) {
+            $subquery = DB::table('customs.bc20_data')
+                ->select('idheader')
+                ->whereRaw('UPPER(kodepeltransit) LIKE UPPER(?)', [$request->pelabuhan_transit . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        if ($request->filled('kode_tps')) {
+            $subquery = DB::table('customs.bc20_data')
+                ->select('idheader')
+                ->whereRaw('UPPER(kodetps) LIKE UPPER(?)', ['%' . $request->kode_tps . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+
+        if ($request->filled('nama_pengangkut')) {
+            $subquery = DB::table('customs.bc20_pengangkut')
+                ->select('idheader')
+                ->whereRaw('UPPER(namapengangkut) LIKE UPPER(?)', ['%' . $request->nama_pengangkut . '%']);
+            $query->whereIn('idheader', $subquery);
+        }
+    }
+
+    /**
+     * Apply sorting restricted to header columns only (fast).
+     */
+    private function applyHeaderSortingOnly($query, Request $request)
+    {
         $sortBy = $request->get('sort_by', 'nomordaftar');
         $sortDirection = $request->get('sort_direction', 'asc');
-        
-        // Handle all sorting in the backend database for optimal performance
-        switch ($sortBy) {
-            case 'nomordaftar':
-            case 'tanggaldaftar':
-            case 'kodejalur':
-                $query->orderBy('bc20_header.' . $sortBy, $sortDirection);
-                break;
-            case 'namaimportir':
-                $query->leftJoin('customs.bc20_entitas as sort_importir', function($join) {
-                    $join->on('bc20_header.idheader', '=', 'sort_importir.idheader')
-                         ->where('sort_importir.kodeentitas', '=', '1');
-                })
-                ->addSelect('sort_importir.namaentitas as sort_importir_name')
-                ->orderBy('sort_importir.namaentitas', $sortDirection);
-                break;
-            case 'namappjk':
-                $query->leftJoin('customs.bc20_entitas as sort_ppjk', function($join) {
-                    $join->on('bc20_header.idheader', '=', 'sort_ppjk.idheader')
-                         ->where('sort_ppjk.kodeentitas', '=', '4');
-                })
-                ->addSelect('sort_ppjk.namaentitas as sort_ppjk_name')
-                ->orderBy('sort_ppjk.namaentitas', $sortDirection);
-                break;
-            case 'namapenjual':
-                $query->leftJoin('customs.bc20_entitas as sort_penjual', function($join) {
-                    $join->on('bc20_header.idheader', '=', 'sort_penjual.idheader')
-                         ->where('sort_penjual.kodeentitas', '=', '10');
-                })
-                ->addSelect('sort_penjual.namaentitas as sort_penjual_name')
-                ->orderBy('sort_penjual.namaentitas', $sortDirection);
-                break;
-            case 'kontainer':
-                $query->orderBy('kontainer_agg.kontainer', $sortDirection);
-                break;
-            case 'teus':
-                $query->orderBy('kontainer_agg.teus', $sortDirection);
-                break;
-            case 'barang':
-                $query->orderBy('barang_total', $sortDirection);
-                break;
-            case 'hscode':
-                $query->leftJoin('customs.bc20_barang as sort_barang_hs', function($join) {
-                    $join->on('bc20_header.idheader', '=', 'sort_barang_hs.idheader')
-                         ->where('sort_barang_hs.seribarang', '=', 1);
-                })
-                ->addSelect('sort_barang_hs.postarif as sort_hscode')
-                ->orderBy('sort_barang_hs.postarif', $sortDirection);
-                break;
-            case 'uraianbarang':
-                $query->leftJoin('customs.bc20_barang as sort_barang_uraian', function($join) {
-                    $join->on('bc20_header.idheader', '=', 'sort_barang_uraian.idheader')
-                         ->where('sort_barang_uraian.seribarang', '=', 1);
-                })
-                ->addSelect('sort_barang_uraian.uraian as sort_uraian')
-                ->orderBy('sort_barang_uraian.uraian', $sortDirection);
-                break;
-            default:
-                // Default sort by PIB ascending
-                $query->orderBy('bc20_header.nomordaftar', 'asc');
+
+        // ONLY allow header column sorting (no expensive joins)
+        $allowedSorts = ['nomordaftar', 'tanggaldaftar', 'kodejalur'];
+
+        if (in_array($sortBy, $allowedSorts)) {
+            $query->orderBy($sortBy, $sortDirection);
+        } else {
+            // Default fallback
+            $query->orderBy('nomordaftar', 'asc');
         }
+    }
 
-        // Paginate results
-        $perPage = $request->get('per_page', 20);
-        $data = $query->paginate($perPage);
+    /**
+     * Load entity display data (Nama Perusahaan, Nama PPJK, Nama Penjual) for visible rows only.
+     */
+    private function loadDisplayEntities(array $headerIds)
+    {
+        return DB::table('customs.bc20_entitas')
+            ->select([
+                'idheader',
+                DB::raw("MAX(CASE WHEN kodeentitas = '1' THEN namaentitas END) as namaimportir"),
+                DB::raw("MAX(CASE WHEN kodeentitas = '4' THEN namaentitas END) as namappjk"),
+                DB::raw("MAX(CASE WHEN kodeentitas = '10' THEN namaentitas END) as namapenjual")
+            ])
+            ->whereIn('idheader', $headerIds)
+            ->whereIn('kodeentitas', ['1', '4', '10'])
+            ->groupBy('idheader')
+            ->get()
+            ->keyBy('idheader');
+    }
 
-        // Transform the data to include only the fields needed for table display
-        $data->getCollection()->transform(function ($item) {
-            // Get entity data by code
-            $importir = $item->entitas->where('kodeentitas', '1')->first();
-            $ppjk = $item->entitas->where('kodeentitas', '4')->first();
-            $penjual = $item->entitas->where('kodeentitas', '10')->first();
-            
-            // Get barang count from aggregation (using barang_total field)
-            $barangCount = $item->barang_total ?? 0;
-            
-            // Ensure barangCount is a number, not a collection
-            if (is_object($barangCount) || is_array($barangCount)) {
-                $barangCount = 0;
-            }
-            
-            // Get first barang item from relationship
-            $firstBarang = $item->barang && $item->barang->count() > 0 ? $item->barang->first() : null;
-            
-            // Extract data we need from the relationship before removing it
-            $hscode = $firstBarang ? $firstBarang->postarif : null;
-            $uraianbarang = $firstBarang ? $firstBarang->uraian : null;
-            
-            // Remove the relationships first to avoid conflicts
-            unset($item->entitas, $item->barang);
-            
-            // Add only the fields needed for table display (12 fields total)
-            $item->namaimportir = $importir ? $importir->namaentitas : null;
-            $item->namappjk = $ppjk ? $ppjk->namaentitas : null;
-            $item->namapenjual = $penjual ? $penjual->namaentitas : null;
-            $item->kontainer = $item->kontainer ? (int) $item->kontainer : 0;
-            $item->teus = $item->teus ? (float) $item->teus : 0.0;
-            $item->barang = (int) $barangCount;
-            $item->hscode = $hscode;
-            $item->uraianbarang = $uraianbarang;
-            
-            // Remove temporary fields from the response
-            unset($item->barang_total);
-            
-            return $item;
-        });
+    /**
+     * Load barang display data (count, first HS, first uraian) for visible rows only.
+     */
+    private function loadDisplayBarang(array $headerIds)
+    {
+        return DB::select("
+            SELECT
+                idheader,
+                COUNT(*) as barang_count,
+                MIN(postarif) FILTER (WHERE rn = 1) as first_hscode,
+                MIN(uraian) FILTER (WHERE rn = 1) as first_uraian
+            FROM (
+                SELECT
+                    idheader,
+                    postarif,
+                    uraian,
+                    ROW_NUMBER() OVER (PARTITION BY idheader ORDER BY seribarang) as rn
+                FROM customs.bc20_barang
+                WHERE idheader = ANY(?)
+            ) ranked
+            GROUP BY idheader
+        ", [$headerIds]);
+    }
 
-        return response()->json($data);
+    /**
+     * Load kontainer display data (count, TEUS sum) for visible rows only.
+     */
+    private function loadDisplayKontainer(array $headerIds)
+    {
+        return DB::table('customs.bc20_kontainer')
+            ->select([
+                'idheader',
+                DB::raw('COUNT(*) as kontainer_count'),
+                DB::raw('COALESCE(SUM(teus), 0) as teus_sum')
+            ])
+            ->whereIn('idheader', $headerIds)
+            ->groupBy('idheader')
+            ->get()
+            ->keyBy('idheader');
     }
 
     /**
@@ -753,7 +742,7 @@ class CustomsDataController extends Controller
     private function generateExcelExport(Request $request, array $sections)
     {
         $query = $this->buildExportQuery($request, $sections);
-        
+
         // Use multi-tab export with selected sections only
         $export = new \App\Exports\CustomsDataMultiTabExport($query, $sections);
         $filename = 'customs_data_multi_tab_' . date('Y-m-d_H-i-s') . '.xlsx';
@@ -773,13 +762,13 @@ class CustomsDataController extends Controller
                 'bc20_header.kodejalur',
                 'bc20_header.nomoraju'
             ]);
-            
+
         // Only add kontainer/teus aggregation if 'basic' section is selected AND 'containers' section is NOT selected
         // (to avoid conflict between aggregated counts and relationship loading)
         if (in_array('basic', $sections) && !in_array('containers', $sections)) {
             $query->leftJoin(
                 DB::raw('(
-                    SELECT 
+                    SELECT
                         bh.idheader,
                         COUNT(bk.nomorkontainer) AS kontainer,
                         SUM(
@@ -802,10 +791,10 @@ class CustomsDataController extends Controller
                 'export_kontainer_agg.teus'
             ]);
         }
-            
+
         // Load relationships based on selected sections
         $with = [];
-        
+
         // Load entity data when general or basic section is selected
         if (in_array('general', $sections) || in_array('basic', $sections)) {
             $with['entitas'] = function($query) {
@@ -814,21 +803,21 @@ class CustomsDataController extends Controller
                       ->orderBy('kodeentitas', 'asc');
             };
         }
-        
+
         // Load data when values, bc11, or warehouse sections are selected
         if (in_array('values', $sections) || in_array('bc11', $sections) || in_array('warehouse', $sections)) {
             $with['data'] = function($query) {
                 $query->select('idheader', 'netto', 'bruto', 'cif', 'ndpbm', 'kodevaluta', 'tanggaltiba', 'nomorbc11', 'tanggalbc11', 'posbc11', 'subposbc11', 'kodepelmuat', 'namapelabuhanmuat', 'kodepeltransit', 'namapelabuhantransit', 'kodetps', 'namatpswajib', 'kodekantor', 'namakantorpendek');
             };
         }
-        
+
         // Load pengangkut when bc11 or warehouse sections are selected
         if (in_array('bc11', $sections) || in_array('warehouse', $sections)) {
             $with['pengangkut'] = function($query) {
                 $query->select('idheader', 'namapengangkut', 'nomorpengangkut', 'kodebendera', 'namanegara');
             };
         }
-        
+
         // Load barang when goods section is selected
         if (in_array('goods', $sections)) {
             $with['barang'] = function($query) {
@@ -836,7 +825,7 @@ class CustomsDataController extends Controller
                       ->orderBy('seribarang', 'asc');
             };
         }
-        
+
         // Load dokumen when documents section is selected
         if (in_array('documents', $sections)) {
             $with['dokumen'] = function($query) {
@@ -844,13 +833,13 @@ class CustomsDataController extends Controller
                       ->orderBy('seridokumen', 'asc');
             };
         }
-        
+
         // Always load kontainer relationship - needed for multiple sheets
         $with['kontainer'] = function($query) {
             $query->select('idheader', 'serikontainer', 'nomorkontainer', 'namaukurankontainer', 'namajeniskontainer', 'kodeukurankontainer')
                   ->orderBy('serikontainer', 'asc');
         };
-        
+
         // Load pungutan when duties section is selected
         if (in_array('duties', $sections)) {
             $with['pungutan'] = function($query) {
@@ -858,16 +847,16 @@ class CustomsDataController extends Controller
                       ->whereIn('keterangan', ['BM', 'PPH', 'PPN']);
             };
         }
-        
+
         $query->with($with);
-        
+
         // Apply all the same filters as the main getData method
         $this->applyFilters($query, $request);
         $this->applySorting($query, $request);
-        
+
         return $query;
     }
-    
+
     /**
      * Apply filters to the query (extracted from repeated code).
      */
@@ -884,12 +873,12 @@ class CustomsDataController extends Controller
                          $request->filled('hscode') || $request->filled('nomorkontainer') ||
                          $request->filled('pelabuhan_muat') || $request->filled('pelabuhan_transit') ||
                          $request->filled('kode_tps') || $request->filled('nama_pengangkut');
-            
+
             if (!$hasFilters) {
                 $query->whereDate('tanggaldaftar', now()->toDateString());
             }
         }
-        
+
         // Apply individual filters
         if ($request->filled('nomordaftar')) {
             $query->byRegistrationNumber($request->nomordaftar);
@@ -962,7 +951,7 @@ class CustomsDataController extends Controller
                 $q->whereRaw('UPPER(namapengangkut) LIKE UPPER(?)', ['%' . $request->nama_pengangkut . '%']);
             });
         }
-        
+
         // Handle between/notBetween operators for legacy URL parameters
         if ($request->filled('nomordaftar_not_between_min') && $request->filled('nomordaftar_not_between_max')) {
             $query->whereNotBetween('bc20_header.nomordaftar', [
@@ -971,7 +960,7 @@ class CustomsDataController extends Controller
             ]);
         }
     }
-    
+
     /**
      * Apply sorting to the query (extracted from repeated code).
      */
@@ -979,7 +968,7 @@ class CustomsDataController extends Controller
     {
         $sortBy = $request->get('sort_by', 'nomordaftar');
         $sortDirection = $request->get('sort_direction', 'asc');
-        
+
         switch ($sortBy) {
             case 'nomordaftar':
             case 'tanggaldaftar':
@@ -1031,7 +1020,7 @@ class CustomsDataController extends Controller
                 $query->orderBy('nomordaftar', 'asc');
         }
     }
-    
+
     /**
      * Get autocomplete suggestions for company names.
      */
@@ -1173,10 +1162,10 @@ class CustomsDataController extends Controller
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
             'sections' => 'nullable|string', // Comma-separated list of sections
         ]);
-        
+
         // Parse selected sections
         $sections = $request->filled('sections') ? explode(',', $request->sections) : ['basic'];
-        
+
         return $this->generateExcelExport($request, $sections);
     }
 
@@ -1403,12 +1392,12 @@ class CustomsDataController extends Controller
             'nomordaftar' => 'nullable|numeric|digits_between:1,6',
             'kodejalur' => 'nullable|string|max:1'
         ]);
-        
+
         // Force all sections for complete export
         $request->merge([
             'sections' => 'general,values,bc11,warehouse,goods,documents,containers,duties'
         ]);
-        
+
         // Always export as Excel (multi-tab format)
         return $this->exportExcel($request);
     }
@@ -1441,13 +1430,13 @@ class CustomsDataController extends Controller
         try {
             // Get the BC20 header to extract nomor daftar and tanggal
             $header = BC20Header::where('idheader', $idheader)->first();
-            
+
             if (!$header) {
                 return response()->json(['error' => 'Header not found'], 404);
             }
 
             $client = new \GuzzleHttp\Client();
-            
+
             $response = $client->get("https://apis-gw.beacukai.go.id/v2/report-service/formulir/20/{$idheader}", [
                 'headers' => [
                     'accept' => 'application/json, text/plain, */*',
@@ -1458,11 +1447,11 @@ class CustomsDataController extends Controller
             ]);
 
             $pdfContent = $response->getBody()->getContents();
-            
+
             // Format the date properly (YYYY-MM-DD)
             $date = \Carbon\Carbon::parse($header->tanggaldaftar)->format('Y-m-d');
             $filename = "{$header->nomordaftar}_{$date}.pdf";
-            
+
             return response($pdfContent, 200, [
                 'Content-Type' => 'application/pdf',
                 'Content-Disposition' => "attachment; filename={$filename}",
@@ -1470,7 +1459,7 @@ class CustomsDataController extends Controller
                 'Pragma' => 'no-cache',
                 'Expires' => '0'
             ]);
-            
+
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to download PDF: ' . $e->getMessage()], 500);
         }

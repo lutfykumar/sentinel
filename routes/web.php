@@ -20,6 +20,13 @@ Route::middleware(['auth'])->group(function () {
     // RuleSet Page Route (requires rulesets.view permission)
     Route::middleware('permission:rulesets.view')->get('/rulesets', [RuleSetController::class, 'index'])->name('rulesets.index');
     
+    // Rulesets Routes (requires data.view permission)
+    Route::middleware('permission:data.view')->group(function () {
+        Route::get('rulesets', function () {
+            return Inertia::render('rulesets/Rulesets');
+        })->name('rulesets');
+    });
+    
     // Management Routes (Admin only)
     Route::middleware('role:admin')->group(function () {
         Route::get('management/users', function () {
