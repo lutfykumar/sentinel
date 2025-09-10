@@ -99,12 +99,20 @@ class BC20Header extends Model
         return $this->hasMany(BC20Pengangkut::class, 'idheader', 'idheader');
     }
 
-    /**
+/**
      * Get the charges for the BC20 header.
      */
     public function pungutan(): HasMany
     {
         return $this->hasMany(BC20Pungutan::class, 'idheader', 'idheader');
+    }
+
+    /**
+     * Get the packages for the BC20 header.
+     */
+    public function kemasan(): HasMany
+    {
+        return $this->hasMany(BC20Kemasan::class, 'idheader', 'idheader');
     }
 
     /**

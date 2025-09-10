@@ -33,7 +33,7 @@ class CustomsDataExport implements FromCollection, WithHeadings, WithStyles
         $this->query->chunk(1000, function ($records) use (&$data) {
             foreach ($records as $record) {
                 // Use adaptive multi-row logic like CSV export
-                if (in_array('containers', $this->sections) && $record->kontainer->isNotEmpty()) {
+                if (in_array('containers', $this->sections) && is_object($record->kontainer) && $record->kontainer->isNotEmpty()) {
                     $this->generateContainerLevelRows($record, $data);
                 } elseif (in_array('goods', $this->sections) && $record->barang->isNotEmpty()) {
                     $this->generateGoodsLevelRows($record, $data);
@@ -92,7 +92,7 @@ class CustomsDataExport implements FromCollection, WithHeadings, WithStyles
     
     private function generateContainerLevelRows($record, &$data)
     {
-        $kontainers = $record->kontainer->where('idheader', $record->idheader);
+        $kontainers = is_object($record->kontainer) ? $record->kontainer->where('idheader', $record->idheader) : collect();
         if ($kontainers->isEmpty()) {
             $row = $this->buildRowData($record, null, null, null);
             $data->push($row);
@@ -252,7 +252,7 @@ class CustomsDataExport implements FromCollection, WithHeadings, WithStyles
         
         // Data Kontainer
         if (in_array('containers', $this->sections)) {
-            $kontainerData = $kontainer ?? $record->kontainer->where('idheader', $record->idheader)->first();
+            $kontainerData = $kontainer ?? (is_object($record->kontainer) ? $record->kontainer->where('idheader', $record->idheader)->first() : null);
             $row[] = $kontainerData ? $kontainerData->serikontainer : ''; // No Kontainer (Urut)
             $row[] = $kontainerData ? $kontainerData->nomorkontainer : ''; // Nomor Kontainer
             $row[] = $kontainerData ? $kontainerData->namaukurankontainer : ''; // Ukuran Kontainer

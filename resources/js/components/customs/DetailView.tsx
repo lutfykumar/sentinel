@@ -156,20 +156,24 @@ export default function DetailView({ data, loading, onClose }: DetailViewProps) 
     return `${formatCurrency(unitPrice)} ${currency}`;
   };
 
-  // Get filtered pungutan data
+  // Get all pungutan data sorted by keterangan
   const getPungutanData = () => {
-    if (!data.pungutan) return { bm: 0, pph: 0, ppn: 0, total: 0 };
+    if (!data.pungutan || !Array.isArray(data.pungutan)) {
+      return { items: [], total: 0 };
+    }
     
-    const bmRecord = data.pungutan.find((p: any) => p.keterangan === 'BM');
-    const pphRecord = data.pungutan.find((p: any) => p.keterangan === 'PPH');
-    const ppnRecord = data.pungutan.find((p: any) => p.keterangan === 'PPN');
+    // Sort all pungutan by keterangan (ascending)
+    const sortedPungutan = data.pungutan
+      .map((p: any) => ({
+        keterangan: p.keterangan || '',
+        dibayar: parseFloat(p.dibayar || 0)
+      }))
+      .sort((a: any, b: any) => a.keterangan.localeCompare(b.keterangan));
     
-    const bm = parseFloat(bmRecord?.dibayar || 0);
-    const pph = parseFloat(pphRecord?.dibayar || 0);
-    const ppn = parseFloat(ppnRecord?.dibayar || 0);
-    const total = bm + pph + ppn;
+    // Calculate total of all dibayar amounts
+    const total = sortedPungutan.reduce((sum: number, item: any) => sum + item.dibayar, 0);
     
-    return { bm, pph, ppn, total };
+    return { items: sortedPungutan, total };
   };
 
   const pungutanData = getPungutanData();
@@ -497,7 +501,7 @@ export default function DetailView({ data, loading, onClose }: DetailViewProps) 
                         .sort((a: any, b: any) => (a.serikontainer || 0) - (b.serikontainer || 0))
                         .map((item: any, index: number) => (
                           <TableRow key={index}>
-                            <TableCell className="text-center">{item.serikontainer || index + 1}</TableCell>
+                            <TableCell className="text-center">{index + 1}</TableCell>
                             <TableCell className="text-data">{formatValueUppercase(item.nomorkontainer)}</TableCell>
                             <TableCell>{formatValueUppercase(item.namaukurankontainer)}</TableCell>
                             <TableCell>{formatValueUppercase(item.namajeniskontainer)}</TableCell>
@@ -532,25 +536,27 @@ export default function DetailView({ data, loading, onClose }: DetailViewProps) 
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    <TableRow>
-                      <TableCell className="text-center">1</TableCell>
-                      <TableCell>BM</TableCell>
-                      <TableCell className="text-financial text-right">{formatRupiah(pungutanData.bm)}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="text-center">2</TableCell>
-                      <TableCell>PPH</TableCell>
-                      <TableCell className="text-financial text-right">{formatRupiah(pungutanData.pph)}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="text-center">3</TableCell>
-                      <TableCell>PPN</TableCell>
-                      <TableCell className="text-financial text-right">{formatRupiah(pungutanData.ppn)}</TableCell>
-                    </TableRow>
-                    <TableRow className="border-t-2 border-primary/20 font-semibold">
-                      <TableCell colSpan={2} className="text-right">BM + PPH + PPN = TOTAL BAYAR</TableCell>
-                      <TableCell className="text-financial text-right">{formatRupiah(pungutanData.total)}</TableCell>
-                    </TableRow>
+                    {pungutanData.items.length > 0 ? (
+                      pungutanData.items.map((item: any, index: number) => (
+                        <TableRow key={index}>
+                          <TableCell className="text-center">{index + 1}</TableCell>
+                          <TableCell>{formatValueUppercase(item.keterangan)}</TableCell>
+                          <TableCell className="text-financial text-right">{formatRupiah(item.dibayar)}</TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-center text-muted-foreground py-4">
+                          No pungutan data available
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {pungutanData.items.length > 0 && (
+                      <TableRow className="border-t-2 border-primary/20 font-semibold">
+                        <TableCell colSpan={2} className="text-right">TOTAL BAYAR</TableCell>
+                        <TableCell className="text-financial text-right">{formatRupiah(pungutanData.total)}</TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                   </Table>
                 </div>

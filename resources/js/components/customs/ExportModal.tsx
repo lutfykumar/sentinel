@@ -39,10 +39,10 @@ interface ExportModalProps {
 const exportSections: ExportSection[] = [
   {
     id: 'basic',
-    label: 'Basic Information',
+    label: 'Search Results',
     icon: <FileText className="h-4 w-4" />,
-    description: 'PIB, Date, Route, Company, PPJK, Seller',
-    enabled: true, // Always enabled as it's the base data
+    description: 'No, PIB, Tanggal, Jalur, Nama Perusahaan, Nama PPJK, Nama Penjual, Kontainer, TEUS, HS, Uraian Barang',
+    enabled: false, // Not required anymore
   },
   {
     id: 'general',
@@ -108,7 +108,7 @@ const exportPresets: ExportPreset[] = [
     name: 'Basic Report',
     description: 'Essential information for general overview',
     icon: <FileText className="h-5 w-5" />,
-    sections: ['basic', 'general'],
+    sections: ['general'],
   },
   {
     id: 'financial',
@@ -134,7 +134,7 @@ const exportPresets: ExportPreset[] = [
 ];
 
 export default function ExportModal({ open, onClose, onExport, hasResults }: ExportModalProps) {
-  const [selectedSections, setSelectedSections] = useState<string[]>(['basic']);
+  const [selectedSections, setSelectedSections] = useState<string[]>([]);
   const [activePreset, setActivePreset] = useState<string | null>(null);
 
   const handlePresetSelect = (preset: ExportPreset) => {
@@ -144,7 +144,6 @@ export default function ExportModal({ open, onClose, onExport, hasResults }: Exp
 
   const handleSectionToggle = (sectionId: string, enabled: boolean) => {
     setActivePreset(null); // Clear active preset when manually changing sections
-    if (sectionId === 'basic') return; // Basic is always required
     
     if (enabled) {
       setSelectedSections(prev => [...prev, sectionId]);
@@ -158,20 +157,6 @@ export default function ExportModal({ open, onClose, onExport, hasResults }: Exp
     onClose();
   };
 
-  const getSelectedSectionsCount = () => selectedSections.length;
-  const getEstimatedRows = () => {
-    // Base estimation logic - you can adjust based on your data
-    if (selectedSections.includes('containers')) {
-      return "Multiple rows per PIB (container-level detail)";
-    }
-    if (selectedSections.includes('goods')) {
-      return "Multiple rows per PIB (goods-level detail)";
-    }
-    if (selectedSections.includes('documents')) {
-      return "Multiple rows per PIB (document-level detail)";
-    }
-    return "One row per PIB";
-  };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -222,7 +207,7 @@ export default function ExportModal({ open, onClose, onExport, hasResults }: Exp
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
               {exportSections.map((section) => {
                 const isSelected = selectedSections.includes(section.id);
-                const isDisabled = section.id === 'basic'; // Basic is always required
+                const isDisabled = false; // No sections are required anymore
                 
                 return (
                   <div
@@ -250,11 +235,6 @@ export default function ExportModal({ open, onClose, onExport, hasResults }: Exp
                         >
                           {section.icon}
                           {section.label}
-                          {isDisabled && (
-                            <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
-                              Required
-                            </span>
-                          )}
                         </Label>
                         <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
                           {section.description}
@@ -267,17 +247,6 @@ export default function ExportModal({ open, onClose, onExport, hasResults }: Exp
             </div>
           </div>
 
-          {/* Export Summary */}
-          <div className="bg-muted/30 p-5 rounded-lg">
-            <h4 className="font-semibold mb-3 text-base">📊 Export Summary</h4>
-            <div className="text-sm space-y-2">
-              <div>Selected sections: <strong>{getSelectedSectionsCount()}</strong></div>
-              <div>Data structure: <strong>{getEstimatedRows()}</strong></div>
-              <div className="text-muted-foreground mt-3 text-xs">
-                ℹ️ Container and goods details will create multiple rows per PIB for detailed analysis.
-              </div>
-            </div>
-          </div>
         </div>
 
         <DialogFooter className="flex gap-3 pt-4">

@@ -49,7 +49,7 @@ export default function ExportButtons({ filters }: ExportButtonsProps) {
 
       switch (format) {
         case 'excel':
-          endpoint = '/data/api/export/excel';
+          endpoint = '/api/data/export/excel';
           filename = `customs_data_${new Date().toISOString().split('T')[0]}.xlsx`;
           contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
           break;

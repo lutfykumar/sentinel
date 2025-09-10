@@ -38,6 +38,9 @@ interface CustomsRecord {
   namaimportir?: string;
   namappjk?: string;
   namapenjual?: string;
+  kontainer?: number;
+  teus?: number;
+  barang?: number;
   hscode?: string;
   uraianbarang?: string;
 }
@@ -63,6 +66,7 @@ interface ResultsTableProps {
   getSortIcon: (column: string) => React.ReactNode;
   detailData: any;
   detailLoading: boolean;
+  hasSearched: boolean;
   onDetailClose: () => void;
 }
 
@@ -78,6 +82,7 @@ export default function ResultsTable({
   getSortIcon,
   detailData,
   detailLoading,
+  hasSearched,
   onDetailClose
 }: ResultsTableProps) {
   const formatDate = (dateString: string) => {
@@ -111,7 +116,7 @@ export default function ResultsTable({
       console.log('Downloading PDF for:', record.idheader);
       
       // Use backend proxy for PDF download
-      const proxyUrl = `/data/api/download/pdf/${record.idheader}`;
+      const proxyUrl = `/api/data/download/pdf/${record.idheader}`;
       const link = document.createElement('a');
       link.href = proxyUrl;
       link.target = '_blank'; // Open in new tab to handle any errors gracefully
@@ -140,10 +145,18 @@ export default function ResultsTable({
 
   if (data.length === 0) {
     return (
-      <div className="flex items-center justify-center py-12">
+      <div className="flex items-center justify-center py-12 border-2 border-dashed border-gray-300 rounded-lg">
         <div className="text-center space-y-4">
-          <p className="text-lg text-muted-foreground">No records found</p>
-          <p className="text-sm text-muted-foreground">Try adjusting your filter criteria</p>
+          <div className="text-6xl">{hasSearched ? '📋' : '🔍'}</div>
+          <div className="text-xl font-semibold text-muted-foreground">
+            {hasSearched ? 'No Results Found' : 'Start Your Search'}
+          </div>
+          <p className="text-sm text-muted-foreground max-w-md">
+            {hasSearched 
+              ? 'No customs records match your current search criteria. Try adjusting your filters or search terms to find the data you\'re looking for.'
+              : 'Use the search filters above to find customs data. Enter your search criteria and click "Search" to view results.'
+            }
+          </p>
         </div>
       </div>
     );
@@ -213,6 +226,33 @@ export default function ResultsTable({
                 </div>
               </TableHead>
               <TableHead 
+                className="w-[90px] text-center cursor-pointer hover:bg-muted/50"
+                onClick={() => onSort('kontainer')}
+              >
+                <div className="flex items-center justify-center space-x-2">
+                  <span>Kontainer</span>
+                  {getSortIcon('kontainer')}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="w-[80px] text-center cursor-pointer hover:bg-muted/50"
+                onClick={() => onSort('teus')}
+              >
+                <div className="flex items-center justify-center space-x-2">
+                  <span>TEUS</span>
+                  {getSortIcon('teus')}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="w-[80px] text-center cursor-pointer hover:bg-muted/50"
+                onClick={() => onSort('barang')}
+              >
+                <div className="flex items-center justify-center space-x-2">
+                  <span>Barang</span>
+                  {getSortIcon('barang')}
+                </div>
+              </TableHead>
+              <TableHead 
                 className="w-[100px] cursor-pointer hover:bg-muted/50"
                 onClick={() => onSort('hscode')}
               >
@@ -276,6 +316,15 @@ export default function ResultsTable({
                       {formatValueUppercase(record.namapenjual)}
                     </TableCell>
                     <TableCell className="text-data text-center">
+                      {record.kontainer ?? 0}
+                    </TableCell>
+                    <TableCell className="text-data text-center">
+                      {(record.teus ?? 0).toFixed(2)}
+                    </TableCell>
+                    <TableCell className="text-data text-center">
+                      {record.barang ?? 0}
+                    </TableCell>
+                    <TableCell className="text-data text-center">
                       {formatValueUppercase(record.hscode)}
                     </TableCell>
                     <TableCell className="max-w-[400px] truncate text-sm" title={formatValueUppercase(record.uraianbarang)}>
@@ -295,7 +344,7 @@ export default function ResultsTable({
                   </TableRow>
                   {expandedRow === record.idheader && (
                     <TableRow>
-                      <TableCell colSpan={10} className="p-0 bg-muted/20">
+                      <TableCell colSpan={13} className="p-0 bg-muted/20">
                         <div className="p-4">
                           <DetailView
                             data={detailData}

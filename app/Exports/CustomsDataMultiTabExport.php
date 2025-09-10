@@ -9,9 +9,12 @@ use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithTitle;
 use Maatwebsite\Excel\Concerns\WithStyles;
+use Maatwebsite\Excel\Events\AfterSheet;
+use Maatwebsite\Excel\Concerns\WithEvents;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\Color;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -30,16 +33,22 @@ class CustomsDataMultiTabExport implements WithMultipleSheets
 
     public function sheets(): array
     {
+        // DEBUG: Log what sections we received
+        error_log('EXPORT DEBUG: Sections received: ' . implode(', ', $this->sections));
+        
         $sheets = [];
         
-        // If no sections specified, include all (for backward compatibility)
+        // If no sections specified, include general for backward compatibility
         if (empty($this->sections)) {
-            $this->sections = ['general', 'values', 'bc11', 'warehouse', 'goods', 'documents', 'containers', 'duties'];
+            $this->sections = ['general'];
         }
         
         // Add sheets based on selected sections
-        // Handle 'basic' section for backward compatibility
-        if (in_array('basic', $this->sections) || in_array('general', $this->sections)) {
+        if (in_array('basic', $this->sections)) {
+            $sheets['Search Results'] = new SearchResultsSheet($this->query);
+        }
+        
+        if (in_array('general', $this->sections)) {
             $sheets['Data Umum'] = new DataUmumSheet($this->query);
         }
         
@@ -60,24 +69,124 @@ class CustomsDataMultiTabExport implements WithMultipleSheets
         }
         
         if (in_array('containers', $this->sections)) {
+            error_log('EXPORT DEBUG: Adding KontainerSheet');
             $sheets['Kontainer'] = new KontainerSheet($this->query);
+        } else {
+            error_log('EXPORT DEBUG: containers section NOT found in: ' . implode(', ', $this->sections));
         }
         
         if (in_array('duties', $this->sections)) {
             $sheets['Pungutan'] = new PungutanSheet($this->query);
         }
         
-        // If no valid sections, at least include basic data
+        // If no valid sections, at least include search results data
         if (empty($sheets)) {
-            $sheets['Data Umum'] = new DataUmumSheet($this->query);
+            $sheets['Search Results'] = new SearchResultsSheet($this->query);
         }
         
         return $sheets;
     }
 }
 
+// Search Results Tab
+class SearchResultsSheet implements FromCollection, WithTitle, WithStyles, WithHeadings, WithEvents
+{
+    protected $query;
+    
+    public function __construct(Builder $query)
+    {
+        $this->query = $query;
+    }
+
+    public function collection()
+    {
+        $data = new Collection();
+        
+        // Use smaller chunk size to reduce memory usage
+        $rowNumber = 1;
+        $this->query->chunk(100, function ($records) use (&$data, &$rowNumber) {
+            foreach ($records as $record) {
+                $entitas = is_object($record->entitas) ? $record->entitas : collect([]);
+                $importir = $entitas->where('kodeentitas', '1')->first();
+                $ppjk = $entitas->where('kodeentitas', '4')->first();
+                $penjual = $entitas->where('kodeentitas', '10')->first();
+                $firstBarang = $record->barang->first();
+                
+                // Calculate kontainer and TEUS dynamically if not pre-calculated
+                $kontainerCount = 0;
+                $teusTotal = 0.0;
+                
+                if (isset($record->kontainer) && is_numeric($record->kontainer)) {
+                    // Use pre-calculated values from aggregation
+                    $kontainerCount = $record->kontainer;
+                    $teusTotal = $record->teus ?? 0.0;
+                } else {
+                    // Calculate from relationship
+                    $kontainers = $record->kontainer ?? collect();
+                    $kontainerCount = $kontainers->count();
+                    
+                    foreach ($kontainers as $kontainer) {
+                        switch ($kontainer->kodeukurankontainer) {
+                            case '20': $teusTotal += 1.0; break;
+                            case '40': $teusTotal += 2.0; break;
+                            case '45': $teusTotal += 2.25; break;
+                            case '60': $teusTotal += 3.0; break;
+                        }
+                    }
+                }
+                
+                $row = [
+                    $rowNumber++, // No
+                    $record->nomordaftar, // PIB
+                    $record->tanggaldaftar, // Tanggal
+                    $record->kodejalur, // Jalur
+                    $importir ? $importir->namaentitas : '', // Nama Perusahaan
+                    $ppjk ? $ppjk->namaentitas : '', // Nama PPJK
+                    $penjual ? $penjual->namaentitas : '', // Nama Penjual
+                    $kontainerCount, // Kontainer
+                    number_format($teusTotal, 2), // TEUS
+                    $firstBarang ? $firstBarang->postarif : '', // HS
+                    $firstBarang ? $firstBarang->uraian : '', // Uraian Barang
+                ];
+                
+                $data->push($row);
+            }
+        });
+        
+        return $data;
+    }
+
+    public function headings(): array
+    {
+        return [
+            'No', 'PIB', 'Tanggal', 'Jalur', 'Nama Perusahaan', 'Nama PPJK', 'Nama Penjual', 'Kontainer', 'TEUS', 'HS', 'Uraian Barang'
+        ];
+    }
+
+    public function title(): string
+    {
+        return 'Search Results';
+    }
+
+    public function styles(Worksheet $sheet)
+    {
+        return [
+            1 => ['font' => ['bold' => true, 'color' => ['argb' => 'FFFFFF']], 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => '366092']]]
+        ];
+    }
+    
+    public function registerEvents(): array
+    {
+        return [
+            AfterSheet::class => function(AfterSheet $event) {
+                $event->sheet->getDelegate()->getTabColor()->setRGB('0066CC');
+            },
+        ];
+    }
+}
+
 // Data Umum Tab
-class DataUmumSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
+class DataUmumSheet implements FromCollection, WithTitle, WithStyles, WithHeadings, WithEvents
 {
     protected $query;
     
@@ -93,12 +202,13 @@ class DataUmumSheet implements FromCollection, WithHeadings, WithTitle, WithStyl
         // Use smaller chunk size to reduce memory usage
         $this->query->chunk(100, function ($records) use (&$data) {
             foreach ($records as $record) {
-                $importir = $record->entitas->where('kodeentitas', '1')->first();
-                $ppjk = $record->entitas->where('kodeentitas', '4')->first();
-                $penjual = $record->entitas->where('kodeentitas', '10')->first();
-                $pengirim = $record->entitas->where('kodeentitas', '9')->first();
-                $pemilik = $record->entitas->where('kodeentitas', '7')->first();
-                $dataRecord = $record->data->where('idheader', $record->idheader)->first();
+                $entitas = is_object($record->entitas) ? $record->entitas : collect([]);
+                $importir = $entitas->where('kodeentitas', '1')->first();
+                $ppjk = $entitas->where('kodeentitas', '4')->first();
+                $penjual = $entitas->where('kodeentitas', '10')->first();
+                $pengirim = $entitas->where('kodeentitas', '9')->first();
+                $pemilik = $entitas->where('kodeentitas', '7')->first();
+                $dataRecord = is_object($record->data) ? $record->data->where('idheader', $record->idheader)->first() : null;
                 
                 $row = [
                     $record->nomordaftar, // PIB
@@ -158,14 +268,23 @@ class DataUmumSheet implements FromCollection, WithHeadings, WithTitle, WithStyl
         return [
             1 => [
                 'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '4F81BD']]
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '2563EB']] // Blue-600 (Data Umum)
             ],
+        ];
+    }
+    
+    public function registerEvents(): array
+    {
+        return [
+            AfterSheet::class => function(AfterSheet $event) {
+                $event->sheet->getDelegate()->getTabColor()->setRGB('2563EB'); // Blue-600
+            },
         ];
     }
 }
 
 // Nilai Tab
-class NilaiSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
+class NilaiSheet implements FromCollection, WithHeadings, WithTitle, WithStyles, WithEvents
 {
     protected $query;
     
@@ -180,7 +299,7 @@ class NilaiSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
         
         $this->query->chunk(100, function ($records) use (&$data) {
             foreach ($records as $record) {
-                $dataRecord = $record->data->where('idheader', $record->idheader)->first();
+                $dataRecord = is_object($record->data) ? $record->data->where('idheader', $record->idheader)->first() : null;
                 
                 $row = [
                     $record->nomordaftar, // PIB
@@ -219,14 +338,23 @@ class NilaiSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
         return [
             1 => [
                 'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '4F81BD']]
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'CA8A04']] // Yellow-600 (Data Nilai)
             ],
+        ];
+    }
+    
+    public function registerEvents(): array
+    {
+        return [
+            AfterSheet::class => function(AfterSheet $event) {
+                $event->sheet->getDelegate()->getTabColor()->setRGB('CA8A04'); // Yellow-600
+            },
         ];
     }
 }
 
 // BC 1.1 & Gudang Tab
-class BC11GudangSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
+class BC11GudangSheet implements FromCollection, WithHeadings, WithTitle, WithStyles, WithEvents
 {
     protected $query;
     
@@ -241,8 +369,8 @@ class BC11GudangSheet implements FromCollection, WithHeadings, WithTitle, WithSt
         
         $this->query->chunk(100, function ($records) use (&$data) {
             foreach ($records as $record) {
-                $dataRecord = $record->data->where('idheader', $record->idheader)->first();
-                $pengangkut = $record->pengangkut->where('idheader', $record->idheader)->first();
+                $dataRecord = is_object($record->data) ? $record->data->where('idheader', $record->idheader)->first() : null;
+                $pengangkut = is_object($record->pengangkut) ? $record->pengangkut->where('idheader', $record->idheader)->first() : null;
                 
                 $row = [
                     $record->nomordaftar, // PIB
@@ -287,14 +415,23 @@ class BC11GudangSheet implements FromCollection, WithHeadings, WithTitle, WithSt
         return [
             1 => [
                 'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '4F81BD']]
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '06B6D4']] // Cyan
             ],
+        ];
+    }
+    
+    public function registerEvents(): array
+    {
+        return [
+            AfterSheet::class => function(AfterSheet $event) {
+                $event->sheet->getDelegate()->getTabColor()->setRGB('06B6D4'); // Cyan tab
+            },
         ];
     }
 }
 
 // Barang Tab
-class BarangSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
+class BarangSheet implements FromCollection, WithHeadings, WithTitle, WithStyles, WithEvents
 {
     protected $query;
     
@@ -309,8 +446,8 @@ class BarangSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
         
         $this->query->chunk(100, function ($records) use (&$data) {
             foreach ($records as $record) {
-                $barangs = $record->barang->where('idheader', $record->idheader);
-                $dataRecord = $record->data->where('idheader', $record->idheader)->first();
+                $barangs = is_object($record->barang) ? $record->barang->where('idheader', $record->idheader) : collect([]);
+                $dataRecord = is_object($record->data) ? $record->data->where('idheader', $record->idheader)->first() : null;
                 
                 if ($barangs->isEmpty()) {
                     // If no goods, create one row with empty goods data
@@ -376,14 +513,23 @@ class BarangSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
         return [
             1 => [
                 'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '4F81BD']]
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'EA580C']] // Orange-600 (Data Barang)
             ],
+        ];
+    }
+    
+    public function registerEvents(): array
+    {
+        return [
+            AfterSheet::class => function(AfterSheet $event) {
+                $event->sheet->getDelegate()->getTabColor()->setRGB('EA580C'); // Orange-600
+            },
         ];
     }
 }
 
 // Dokumen Tab
-class DokumenSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
+class DokumenSheet implements FromCollection, WithHeadings, WithTitle, WithStyles, WithEvents
 {
     protected $query;
     
@@ -398,7 +544,7 @@ class DokumenSheet implements FromCollection, WithHeadings, WithTitle, WithStyle
         
         $this->query->chunk(100, function ($records) use (&$data) {
             foreach ($records as $record) {
-                $dokumens = $record->dokumen->where('idheader', $record->idheader);
+                $dokumens = is_object($record->dokumen) ? $record->dokumen->where('idheader', $record->idheader) : collect([]);
                 
                 if ($dokumens->isEmpty()) {
                     $row = [
@@ -453,14 +599,23 @@ class DokumenSheet implements FromCollection, WithHeadings, WithTitle, WithStyle
         return [
             1 => [
                 'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '4F81BD']]
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '7C3AED']] // Purple-600 (Data Lampiran)
             ],
+        ];
+    }
+    
+    public function registerEvents(): array
+    {
+        return [
+            AfterSheet::class => function(AfterSheet $event) {
+                $event->sheet->getDelegate()->getTabColor()->setRGB('7C3AED'); // Purple-600
+            },
         ];
     }
 }
 
 // Kontainer Tab
-class KontainerSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
+class KontainerSheet implements FromCollection, WithHeadings, WithTitle, WithStyles, WithEvents
 {
     protected $query;
     
@@ -475,7 +630,14 @@ class KontainerSheet implements FromCollection, WithHeadings, WithTitle, WithSty
         
         $this->query->chunk(100, function ($records) use (&$data) {
             foreach ($records as $record) {
-                $kontainers = $record->kontainer->where('idheader', $record->idheader);
+                // DEBUG: See what's actually in the record
+                error_log('DEBUG PIB: ' . $record->nomordaftar . ' | kontainer type: ' . gettype($record->kontainer) . ' | is_object: ' . (is_object($record->kontainer) ? 'yes' : 'no'));
+                if (is_object($record->kontainer)) {
+                    error_log('DEBUG PIB: ' . $record->nomordaftar . ' | kontainer count before filter: ' . $record->kontainer->count());
+                }
+                
+                $kontainers = is_object($record->kontainer) ? $record->kontainer->where('idheader', $record->idheader) : collect([]);
+                error_log('DEBUG PIB: ' . $record->nomordaftar . ' | kontainers after filter: ' . $kontainers->count());
                 
                 if ($kontainers->isEmpty()) {
                     $row = [
@@ -524,14 +686,23 @@ class KontainerSheet implements FromCollection, WithHeadings, WithTitle, WithSty
         return [
             1 => [
                 'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '4F81BD']]
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'DC2626']] // Red-600 (Data Kontainer)
             ],
+        ];
+    }
+    
+    public function registerEvents(): array
+    {
+        return [
+            AfterSheet::class => function(AfterSheet $event) {
+                $event->sheet->getDelegate()->getTabColor()->setRGB('DC2626'); // Red-600
+            },
         ];
     }
 }
 
-// Pungutan Tab
-class PungutanSheet implements FromCollection, WithHeadings, WithTitle, WithStyles
+// Data Pungutan Tab
+class PungutanSheet implements FromCollection, WithHeadings, WithTitle, WithStyles, WithEvents
 {
     protected $query;
     
@@ -546,29 +717,41 @@ class PungutanSheet implements FromCollection, WithHeadings, WithTitle, WithStyl
         
         $this->query->chunk(100, function ($records) use (&$data) {
             foreach ($records as $record) {
-                $pungutans = $record->pungutan->where('idheader', $record->idheader)->whereIn('keterangan', ['BM', 'PPH', 'PPN']);
+                // Get ALL pungutan types for this record (not just BM, PPH, PPN)
+                $pungutans = is_object($record->pungutan) ? $record->pungutan->where('idheader', $record->idheader) : collect([]);
                 
                 if ($pungutans->isEmpty()) {
+                    // If no pungutan data, create one row with empty values
                     $row = [
                         $record->nomordaftar, // PIB
                         $record->tanggaldaftar, // Tanggal
                         $record->kodejalur, // Jalur
-                        '', '', ''
+                        '', // No Pungutan
+                        'No pungutan data', // Jenis Pungutan
+                        'Rp. 0,00' // Nilai Pungutan
                     ];
                     $data->push($row);
                 } else {
-                    foreach ($pungutans as $pungutan) {
-                        $dutyNumber = 1;
-                        if ($pungutan->keterangan == 'PPH') $dutyNumber = 2;
-                        if ($pungutan->keterangan == 'PPN') $dutyNumber = 3;
-                        
+                    // Process and sort pungutan data alphabetically
+                    $sortedPungutan = $pungutans
+                        ->map(function($p) {
+                            return [
+                                'keterangan' => $p->keterangan ?: '',
+                                'dibayar' => floatval($p->dibayar ?: 0)
+                            ];
+                        })
+                        ->sortBy('keterangan');
+                    
+                    // Export each pungutan type as separate row (like other sheets)
+                    $seqNumber = 1;
+                    foreach ($sortedPungutan as $item) {
                         $row = [
                             $record->nomordaftar, // PIB
                             $record->tanggaldaftar, // Tanggal
                             $record->kodejalur, // Jalur
-                            $dutyNumber, // No Pungutan
-                            $pungutan->keterangan, // Jenis Pungutan
-                            $pungutan->dibayar, // Nilai Pungutan
+                            $seqNumber++, // No Pungutan
+                            strtoupper($item['keterangan']), // Jenis Pungutan
+                            $this->formatRupiah($item['dibayar']) // Nilai Pungutan
                         ];
                         
                         $data->push($row);
@@ -579,17 +762,35 @@ class PungutanSheet implements FromCollection, WithHeadings, WithTitle, WithStyl
         
         return $data;
     }
+    
+    /**
+     * Format currency exactly like frontend formatRupiah function
+     */
+    private function formatRupiah($amount)
+    {
+        if ($amount === null || $amount === 0) {
+            return 'Rp. 0,00';
+        }
+        
+        $formattedNumber = number_format($amount, 2, ',', '.');
+        return "Rp. {$formattedNumber}";
+    }
 
     public function headings(): array
     {
         return [
-            'PIB', 'Tanggal', 'Jalur', 'No Pungutan', 'Jenis Pungutan', 'Nilai Pungutan'
+            'PIB',
+            'Tanggal',
+            'Jalur',
+            'No Pungutan',
+            'Jenis Pungutan',
+            'Nilai Pungutan'
         ];
     }
 
     public function title(): string
     {
-        return 'Pungutan';
+        return 'Data Pungutan';
     }
 
     public function styles(Worksheet $sheet)
@@ -597,8 +798,17 @@ class PungutanSheet implements FromCollection, WithHeadings, WithTitle, WithStyl
         return [
             1 => [
                 'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '4F81BD']]
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '059669']] // Green-600 (Data Pungutan)
             ],
+        ];
+    }
+    
+    public function registerEvents(): array
+    {
+        return [
+            AfterSheet::class => function(AfterSheet $event) {
+                $event->sheet->getDelegate()->getTabColor()->setRGB('059669'); // Green-600
+            },
         ];
     }
 }

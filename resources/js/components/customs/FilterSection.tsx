@@ -104,7 +104,7 @@ export default function FilterSection({
                 id="namaimportir"
                 value={filters.namaimportir}
                 onChange={(value) => onFilterChange('namaimportir', value)}
-                apiEndpoint="/data/api/suggestions/importir"
+apiEndpoint="/api/data/suggestions/importir"
                 placeholder="Cari nama importir..."
                 className="w-full"
               />
@@ -117,7 +117,7 @@ export default function FilterSection({
                 id="namapenjual"
                 value={filters.namapenjual}
                 onChange={(value) => onFilterChange('namapenjual', value)}
-                apiEndpoint="/data/api/suggestions/penjual"
+apiEndpoint="/api/data/suggestions/penjual"
                 placeholder="Cari nama penjual..."
                 className="w-full"
               />
@@ -130,7 +130,7 @@ export default function FilterSection({
                 id="namapengirim"
                 value={filters.namapengirim}
                 onChange={(value) => onFilterChange('namapengirim', value)}
-                apiEndpoint="/data/api/suggestions/pengirim"
+apiEndpoint="/api/data/suggestions/pengirim"
                 placeholder="Cari nama pengirim..."
                 className="w-full"
               />
@@ -143,7 +143,7 @@ export default function FilterSection({
                 id="namappjk"
                 value={filters.namappjk}
                 onChange={(value) => onFilterChange('namappjk', value)}
-                apiEndpoint="/data/api/suggestions/ppjk"
+apiEndpoint="/api/data/suggestions/ppjk"
                 placeholder="Cari nama PPJK..."
                 className="w-full"
               />
@@ -156,7 +156,7 @@ export default function FilterSection({
                 id="negaraasal"
                 value={filters.negaraasal}
                 onChange={(value) => onFilterChange('negaraasal', value)}
-                apiEndpoint="/data/api/suggestions/negara-asal"
+apiEndpoint="/api/data/suggestions/negara-asal"
                 placeholder="Cari negara asal..."
                 className="w-full"
               />
@@ -169,7 +169,7 @@ export default function FilterSection({
                 id="uraianbarang"
                 value={filters.uraianbarang}
                 onChange={(value) => onFilterChange('uraianbarang', value)}
-                apiEndpoint="/data/api/suggestions/uraian-barang"
+apiEndpoint="/api/data/suggestions/uraian-barang"
                 placeholder="Cari uraian barang..."
                 className="w-full"
               />
@@ -182,7 +182,7 @@ export default function FilterSection({
                 id="hscode"
                 value={filters.hscode}
                 onChange={(value) => onFilterChange('hscode', value)}
-                apiEndpoint="/data/api/suggestions/hs-code"
+apiEndpoint="/api/data/suggestions/hs-code"
                 placeholder="Cari HS Code..."
                 className="w-full"
               />
@@ -195,7 +195,7 @@ export default function FilterSection({
                 id="nomorkontainer"
                 value={filters.nomorkontainer}
                 onChange={(value) => onFilterChange('nomorkontainer', value)}
-                apiEndpoint="/data/api/suggestions/nomor-kontainer"
+apiEndpoint="/api/data/suggestions/nomor-kontainer"
                 placeholder="Cari nomor kontainer..."
                 className="w-full"
               />
@@ -208,7 +208,7 @@ export default function FilterSection({
                 id="pelabuhan_muat"
                 value={filters.pelabuhan_muat}
                 onChange={(value) => onFilterChange('pelabuhan_muat', value.toUpperCase())}
-                apiEndpoint="/data/api/suggestions/pelabuhan-muat"
+apiEndpoint="/api/data/suggestions/pelabuhan-muat"
                 placeholder="Cari pelabuhan muat..."
                 maxLength={6}
                 className="w-full"
@@ -222,7 +222,7 @@ export default function FilterSection({
                 id="pelabuhan_transit"
                 value={filters.pelabuhan_transit}
                 onChange={(value) => onFilterChange('pelabuhan_transit', value.toUpperCase())}
-                apiEndpoint="/data/api/suggestions/pelabuhan-transit"
+apiEndpoint="/api/data/suggestions/pelabuhan-transit"
                 placeholder="Cari pelabuhan transit..."
                 maxLength={6}
                 className="w-full"
@@ -236,7 +236,7 @@ export default function FilterSection({
                 id="kode_tps"
                 value={filters.kode_tps}
                 onChange={(value) => onFilterChange('kode_tps', value.toUpperCase())}
-                apiEndpoint="/data/api/suggestions/kode-tps"
+apiEndpoint="/api/data/suggestions/kode-tps"
                 placeholder="Cari kode TPS..."
                 className="w-full"
               />
@@ -249,7 +249,7 @@ export default function FilterSection({
                 id="nama_pengangkut"
                 value={filters.nama_pengangkut}
                 onChange={(value) => onFilterChange('nama_pengangkut', value.toUpperCase())}
-                apiEndpoint="/data/api/suggestions/nama-pengangkut"
+apiEndpoint="/api/data/suggestions/nama-pengangkut"
                 placeholder="Cari nama pengangkut..."
                 className="w-full"
               />

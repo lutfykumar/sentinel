@@ -1,0 +1,359 @@
+/* Custom styles for react-querybuilder to match app theme */
+
+.query-builder-custom {
+  font-family: inherit;
+  background: transparent;
+}
+
+.rule-group-custom {
+  border: 3px solid hsl(var(--border));
+  border-left: 5px solid hsl(var(--primary));
+  box-shadow: 0 3px 6px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  background: linear-gradient(135deg, hsl(var(--card)), hsl(var(--muted)/0.4));
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.rule-group-custom:hover {
+  box-shadow: 0 4px 8px rgba(0,0,0,0.12);
+  border-color: hsl(var(--primary)/0.7);
+}
+
+/* Level-based coloring for nested groups */
+.rule-group-custom[data-level="0"] {
+  background: linear-gradient(135deg, hsl(var(--card)), hsl(220 14% 96%));
+  border-left-color: hsl(var(--primary));
+}
+
+.rule-group-custom[data-level="1"] {
+  background: linear-gradient(135deg, hsl(var(--card)), hsl(210 40% 98%));
+  border-left-color: hsl(210 90% 60%);
+  border-left-width: 3px;
+}
+
+.rule-group-custom[data-level="2"] {
+  background: linear-gradient(135deg, hsl(var(--card)), hsl(280 100% 98%));
+  border-left-color: hsl(280 70% 65%);
+  border-left-width: 3px;
+}
+
+.rule-group-custom[data-level="3"] {
+  background: linear-gradient(135deg, hsl(var(--card)), hsl(140 40% 97%));
+  border-left-color: hsl(140 60% 55%);
+  border-left-width: 3px;
+}
+
+.rule-group-custom[data-level="4"] {
+  background: linear-gradient(135deg, hsl(var(--card)), hsl(30 100% 97%));
+  border-left-color: hsl(30 80% 60%);
+  border-left-width: 3px;
+}
+
+.ruleGroup-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid hsl(var(--border));
+  border-radius: 0.375rem 0.375rem 0 0;
+  background: linear-gradient(135deg, hsl(var(--muted)/0.4), hsl(var(--muted)/0.2));
+  margin: -0.75rem -0.75rem 0.5rem -0.75rem;
+}
+
+/* Header colors based on group level */
+.rule-group-custom[data-level="0"] .ruleGroup-header {
+  background: linear-gradient(135deg, hsl(var(--primary)/0.08), hsl(var(--primary)/0.04));
+  border-bottom-color: hsl(var(--primary)/0.2);
+}
+
+.rule-group-custom[data-level="1"] .ruleGroup-header {
+  background: linear-gradient(135deg, hsl(210 90% 94%), hsl(210 90% 97%));
+  border-bottom-color: hsl(210 90% 85%);
+}
+
+.rule-group-custom[data-level="2"] .ruleGroup-header {
+  background: linear-gradient(135deg, hsl(280 70% 94%), hsl(280 70% 97%));
+  border-bottom-color: hsl(280 70% 85%);
+}
+
+.rule-group-custom[data-level="3"] .ruleGroup-header {
+  background: linear-gradient(135deg, hsl(140 60% 94%), hsl(140 60% 97%));
+  border-bottom-color: hsl(140 60% 85%);
+}
+
+.rule-group-custom[data-level="4"] .ruleGroup-header {
+  background: linear-gradient(135deg, hsl(30 80% 94%), hsl(30 80% 97%));
+  border-bottom-color: hsl(30 80% 85%);
+}
+
+.ruleGroup-combinators {
+  border: 2px solid hsl(var(--border));
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  font-weight: 600;
+  min-width: 80px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  transition: all 0.2s ease;
+}
+
+.ruleGroup-combinators:hover {
+  border-color: hsl(var(--primary)/0.5);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.ruleGroup-combinators:focus {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 3px hsl(var(--ring)/0.1);
+}
+
+/* Combinator colors based on group level */
+.rule-group-custom[data-level="0"] .ruleGroup-combinators {
+  border-color: hsl(var(--primary)/0.4);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(var(--primary)/0.05));
+}
+
+.rule-group-custom[data-level="1"] .ruleGroup-combinators {
+  border-color: hsl(210 90% 70%);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(210 90% 95%));
+}
+
+.rule-group-custom[data-level="2"] .ruleGroup-combinators {
+  border-color: hsl(280 70% 70%);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(280 70% 95%));
+}
+
+.rule-group-custom[data-level="3"] .ruleGroup-combinators {
+  border-color: hsl(140 60% 60%);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(140 60% 95%));
+}
+
+.rule-group-custom[data-level="4"] .ruleGroup-combinators {
+  border-color: hsl(30 80% 65%);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(30 80% 95%));
+}
+
+.rule-custom {
+  border: 3px solid hsl(var(--border));
+  border-left: 4px solid hsl(var(--primary)/0.8);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0.35rem 0;
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(var(--muted)/0.2));
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
+  transition: all 0.2s ease;
+}
+
+.rule-custom:hover {
+  border-color: hsl(var(--primary)/0.5);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(var(--muted)/0.2));
+}
+
+/* Rule colors based on parent group level */
+.rule-group-custom[data-level="0"] .rule-custom {
+  border-left-color: hsl(var(--primary)/0.8);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(220 20% 97%));
+}
+
+.rule-group-custom[data-level="1"] .rule-custom {
+  border-left-color: hsl(210 90% 70%);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(210 30% 98%));
+}
+
+.rule-group-custom[data-level="2"] .rule-custom {
+  border-left-color: hsl(280 70% 75%);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(280 50% 98%));
+}
+
+.rule-group-custom[data-level="3"] .rule-custom {
+  border-left-color: hsl(140 60% 65%);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(140 30% 98%));
+}
+
+.rule-group-custom[data-level="4"] .rule-custom {
+  border-left-color: hsl(30 80% 70%);
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(30 50% 98%));
+}
+
+/* Rule form elements styling */
+.rule-fields,
+.rule-operators,
+.rule-value,
+.combinator-selector-custom,
+.field-selector-custom,
+.operator-selector-custom {
+  border: 3px solid hsl(var(--border));
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+  min-width: 140px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 2px rgba(0,0,0,0.05);
+  transition: all 0.2s ease;
+}
+
+.rule-fields:hover,
+.rule-operators:hover,
+.rule-value:hover,
+.combinator-selector-custom:hover,
+.field-selector-custom:hover,
+.operator-selector-custom:hover {
+  border-color: hsl(var(--primary)/0.5);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.rule-fields:focus,
+.rule-operators:focus,
+.rule-value:focus,
+.combinator-selector-custom:focus,
+.field-selector-custom:focus,
+.operator-selector-custom:focus {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 3px hsl(var(--ring)/0.1);
+}
+
+.value-editor-custom {
+  border: 3px solid hsl(var(--border));
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  min-width: 160px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 2px rgba(0,0,0,0.05);
+  transition: all 0.2s ease;
+}
+
+.value-editor-custom:hover {
+  border-color: hsl(var(--primary)/0.5);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.value-editor-custom:focus {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 3px hsl(var(--ring)/0.1);
+}
+
+/* Placeholder styling */
+.rule-value::placeholder {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.7;
+}
+
+.value-editor-custom::placeholder {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.7;
+}
+
+.add-rule-custom,
+.add-group-custom,
+.clone-rule-custom,
+.clone-group-custom {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border: none;
+  border-radius: 0.375rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin: 0.25rem;
+}
+
+.add-rule-custom:hover,
+.add-group-custom:hover,
+.clone-rule-custom:hover,
+.clone-group-custom:hover {
+  background: hsl(var(--primary)/0.9);
+}
+
+.remove-rule-custom,
+.remove-group-custom {
+  background: hsl(var(--destructive));
+  color: hsl(var(--destructive-foreground));
+  border: none;
+  border-radius: 0.375rem;
+  padding: 0.5rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin: 0.25rem;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.remove-rule-custom:hover,
+.remove-group-custom:hover {
+  background: hsl(var(--destructive)/0.9);
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .rule-custom {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  
+  .combinator-selector-custom,
+  .field-selector-custom,
+  .operator-selector-custom,
+  .value-editor-custom {
+    min-width: unset;
+    width: 100%;
+  }
+}
+
+/* Dark mode adjustments (Tailwind CSS variables will handle this automatically) */
+@media (prefers-color-scheme: dark) {
+  .query-builder-custom {
+    color-scheme: dark;
+  }
+}
+
+/* Custom styling for different field types */
+.value-editor-custom[type="date"] {
+  min-width: 160px;
+}
+
+.value-editor-custom[type="number"] {
+  min-width: 120px;
+}
+
+/* Group header styling */
+.rule-group-custom > .rule-group-header {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+/* Better visual hierarchy */
+.rule-group-custom .rule-group-custom {
+  margin-left: 1rem;
+  border-left: 3px solid hsl(var(--primary)/0.3);
+  padding-left: 1rem;
+}
