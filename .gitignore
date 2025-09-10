@@ -30,3 +30,7 @@ yarn-error.log
 /sentinel-starterkit
 /sentinel-source
 viruz-deploy.zip
+node_modules
+
+.well-known
+/public/.well-known
