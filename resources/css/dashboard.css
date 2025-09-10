@@ -1,0 +1,305 @@
+/* Dashboard Components CSS */
+
+/* Document Summary Cards */
+.document-summary-cards {
+  @apply w-full;
+}
+
+.document-summary-cards .card-hover {
+  @apply transform hover:scale-105 transition-transform duration-200;
+}
+
+.document-summary-cards .stat-card {
+  @apply bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-200 dark:border-gray-700 transition-all duration-200 hover:shadow-xl;
+}
+
+.document-summary-cards .stat-card:hover {
+  @apply shadow-2xl transform translate-y-[-2px];
+}
+
+.document-summary-cards .icon-container {
+  @apply p-2 rounded-lg transition-colors duration-200;
+}
+
+.document-summary-cards .total-card .icon-container {
+  @apply bg-blue-100 dark:bg-blue-900/30;
+}
+
+.document-summary-cards .green-card .icon-container {
+  @apply bg-green-100 dark:bg-green-900/30;
+}
+
+.document-summary-cards .red-card .icon-container {
+  @apply bg-red-100 dark:bg-red-900/30;
+}
+
+.document-summary-cards .refresh-btn {
+  @apply inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-all duration-200 transform hover:scale-105 disabled:transform-none disabled:hover:scale-100;
+}
+
+.document-summary-cards .refresh-btn:hover:not(:disabled) {
+  @apply shadow-lg;
+}
+
+.document-summary-cards .error-alert {
+  @apply mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg;
+}
+
+/* Monthly Document Chart */
+.monthly-document-chart {
+  @apply w-full;
+}
+
+.monthly-document-chart .chart-container {
+  @apply bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-200 dark:border-gray-700 transition-shadow duration-200;
+}
+
+.monthly-document-chart .chart-container:hover {
+  @apply shadow-xl;
+}
+
+.monthly-document-chart .summary-stat {
+  @apply bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 transition-all duration-200 hover:shadow-md transform hover:translate-y-[-1px];
+}
+
+.monthly-document-chart .loading-container {
+  @apply flex items-center justify-center h-96;
+}
+
+.monthly-document-chart .empty-state {
+  @apply flex items-center justify-center h-96;
+}
+
+/* Custom Chart Tooltip */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  @apply bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg;
+}
+
+.recharts-tooltip-wrapper .recharts-tooltip-label {
+  @apply text-gray-900 dark:text-white font-semibold;
+}
+
+.recharts-tooltip-wrapper .recharts-tooltip-item {
+  @apply text-gray-700 dark:text-gray-300;
+}
+
+/* Animation for loading states */
+.loading-pulse {
+  @apply animate-pulse;
+}
+
+.loading-skeleton {
+  @apply bg-gray-200 dark:bg-gray-700 rounded animate-pulse;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .document-summary-cards .grid {
+    @apply grid-cols-1 gap-4;
+  }
+  
+  .monthly-document-chart .grid {
+    @apply grid-cols-1 gap-4;
+  }
+  
+  .document-summary-cards h2,
+  .monthly-document-chart h2 {
+    @apply text-xl;
+  }
+  
+  .document-summary-cards .refresh-btn,
+  .monthly-document-chart .refresh-btn {
+    @apply px-3 py-2 text-sm;
+  }
+}
+
+@media (max-width: 640px) {
+  .document-summary-cards .stat-card,
+  .monthly-document-chart .summary-stat {
+    @apply p-4;
+  }
+  
+  .document-summary-cards .stat-card h3,
+  .monthly-document-chart .summary-stat h3 {
+    @apply text-base;
+  }
+  
+  .document-summary-cards .stat-card p:first-of-type,
+  .monthly-document-chart .summary-stat p:first-of-type {
+    @apply text-2xl;
+  }
+}
+
+/* Dark mode specific adjustments */
+.dark .document-summary-cards .stat-card,
+.dark .monthly-document-chart .chart-container,
+.dark .monthly-document-chart .summary-stat {
+  @apply bg-gray-800 border-gray-700;
+}
+
+.dark .document-summary-cards .stat-card:hover,
+.dark .monthly-document-chart .chart-container:hover,
+.dark .monthly-document-chart .summary-stat:hover {
+  @apply bg-gray-700 border-gray-600;
+}
+
+/* Print styles */
+@media print {
+  .document-summary-cards .refresh-btn,
+  .monthly-document-chart .refresh-btn {
+    @apply hidden;
+  }
+  
+  .document-summary-cards,
+  .monthly-document-chart {
+    @apply break-inside-avoid;
+  }
+}
+
+/* Focus styles for accessibility */
+.document-summary-cards .refresh-btn:focus,
+.monthly-document-chart .refresh-btn:focus {
+  @apply outline-none ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-800;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .document-summary-cards .stat-card,
+  .monthly-document-chart .chart-container,
+  .monthly-document-chart .summary-stat {
+    @apply border-2 border-black dark:border-white;
+  }
+}
+
+/* Import Visualization Dashboard */
+.import-visualization-dashboard {
+  @apply w-full;
+}
+
+.import-visualization-dashboard .globe-container {
+  @apply relative overflow-hidden rounded-lg border border-slate-700 bg-gradient-to-br from-slate-900 to-black;
+}
+
+.import-visualization-dashboard .globe-loading {
+  @apply absolute inset-0 z-10 flex items-center justify-center rounded-lg backdrop-blur-sm;
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.import-visualization-dashboard .globe-fallback {
+  @apply flex items-center justify-center h-96 rounded-lg bg-gradient-to-br from-blue-900 to-slate-900;
+}
+
+.import-visualization-dashboard .countries-panel {
+  @apply bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm;
+}
+
+.import-visualization-dashboard .country-card {
+  @apply bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 transition-all duration-200 hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600;
+}
+
+.import-visualization-dashboard .country-card:hover {
+  @apply transform translate-y-[-1px];
+}
+
+.import-visualization-dashboard .message-success {
+  @apply text-green-600 text-sm bg-green-50 px-3 py-1 rounded-full border border-green-200 dark:text-green-400 dark:bg-green-900/20 dark:border-green-800;
+}
+
+.import-visualization-dashboard .message-error {
+  @apply text-red-600 text-sm bg-red-50 px-3 py-1 rounded-full border border-red-200 dark:text-red-400 dark:bg-red-900/20 dark:border-red-800;
+}
+
+.import-visualization-dashboard .btn-center {
+  @apply px-3 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-all duration-200 flex items-center gap-2;
+}
+
+.import-visualization-dashboard .btn-refresh {
+  @apply px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2;
+}
+
+.import-visualization-dashboard .btn-center:hover,
+.import-visualization-dashboard .btn-refresh:hover:not(:disabled) {
+  @apply shadow-lg transform translate-y-[-1px];
+}
+
+/* Globe-specific animations */
+@keyframes globe-pulse {
+  0%, 100% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.import-visualization-dashboard .globe-loading-animation {
+  animation: globe-pulse 2s ease-in-out infinite;
+}
+
+/* Responsive adjustments for import visualization */
+@media (max-width: 1024px) {
+  .import-visualization-dashboard .grid {
+    @apply grid-cols-1 gap-4;
+  }
+  
+  .import-visualization-dashboard .globe-container {
+    @apply min-h-[400px];
+  }
+  
+  .import-visualization-dashboard .countries-panel .grid {
+    @apply grid-cols-2 gap-2;
+  }
+}
+
+@media (max-width: 768px) {
+  .import-visualization-dashboard h2 {
+    @apply text-xl;
+  }
+  
+  .import-visualization-dashboard .countries-panel .grid {
+    @apply grid-cols-1 gap-2;
+  }
+  
+  .import-visualization-dashboard .btn-center,
+  .import-visualization-dashboard .btn-refresh {
+    @apply px-2 py-1 text-sm;
+  }
+}
+
+/* Dark mode support for import visualization */
+.dark .import-visualization-dashboard .countries-panel {
+  @apply bg-gray-800 border-gray-700;
+}
+
+.dark .import-visualization-dashboard .country-card {
+  @apply bg-gray-800 border-gray-700;
+}
+
+.dark .import-visualization-dashboard .country-card:hover {
+  @apply bg-gray-700 border-gray-600;
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .document-summary-cards .stat-card,
+  .monthly-document-chart .summary-stat,
+  .document-summary-cards .refresh-btn,
+  .monthly-document-chart .refresh-btn,
+  .import-visualization-dashboard .country-card,
+  .import-visualization-dashboard .btn-center,
+  .import-visualization-dashboard .btn-refresh {
+    @apply transition-none transform-none;
+  }
+  
+  .document-summary-cards .stat-card:hover,
+  .monthly-document-chart .summary-stat:hover,
+  .import-visualization-dashboard .country-card:hover,
+  .import-visualization-dashboard .btn-center:hover,
+  .import-visualization-dashboard .btn-refresh:hover {
+    @apply transform-none;
+  }
+  
+  .import-visualization-dashboard .globe-loading-animation {
+    animation: none;
+  }
+}
