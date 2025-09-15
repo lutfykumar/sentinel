@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\CheckUserStatus;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\PermissionMiddleware;
@@ -25,9 +26,15 @@ return Application::configure(basePath: dirname(__DIR__))
             AddLinkHeadersForPreloadedAssets::class,
         ]);
         
+        // Apply user status check to authenticated routes
+        $middleware->group('auth', [
+            CheckUserStatus::class,
+        ]);
+        
         $middleware->alias([
             'role' => RoleMiddleware::class,
             'permission' => PermissionMiddleware::class,
+            'user.status' => CheckUserStatus::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

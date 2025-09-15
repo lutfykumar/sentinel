@@ -67,6 +67,20 @@ Route::middleware(['web', 'auth', 'permission:data.view'])->prefix('data')->grou
     Route::get('/options/response-statuses', [\App\Http\Controllers\CustomsDataController::class, 'getResponseStatuses']);
 });
 
+// Company API Routes - standardized under /api/company/
+Route::middleware(['web', 'auth', 'permission:company.view'])->prefix('company')->group(function () {
+    Route::get('/companies', [\App\Http\Controllers\CompanyController::class, 'getData']);
+    Route::get('/companies/{nib}', [\App\Http\Controllers\CompanyController::class, 'getDetail']);
+    
+    // Suggestion routes
+    Route::get('/suggestions/nib', [\App\Http\Controllers\CompanyController::class, 'getNibSuggestions']);
+    Route::get('/suggestions/npwp-perseroan', [\App\Http\Controllers\CompanyController::class, 'getNpwpPerseroanSuggestions']);
+    Route::get('/suggestions/nama-perseroan', [\App\Http\Controllers\CompanyController::class, 'getNamaPerseroanSuggestions']);
+    Route::get('/suggestions/identitas-penanggung-jwb', [\App\Http\Controllers\CompanyController::class, 'getIdentitasPenanggungJwbSuggestions']);
+    Route::get('/suggestions/nama-penanggung-jwb', [\App\Http\Controllers\CompanyController::class, 'getNamaPenanggungJwbSuggestions']);
+    Route::get('/suggestions/npwp-penanggung-jwb', [\App\Http\Controllers\CompanyController::class, 'getNpwpPenanggungJwbSuggestions']);
+});
+
 // Rule Set Management Routes - using web middleware for session-based auth
 Route::middleware(['web', 'auth'])->group(function () {
     // Get user's rule sets

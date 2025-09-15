@@ -6,17 +6,39 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AuthLayout from '@/layouts/auth-layout';
-import { Form, Head } from '@inertiajs/react';
+import { Form, Head, usePage } from '@inertiajs/react';
 import { LoaderCircle } from 'lucide-react';
 
 interface LoginProps {
     status?: string;
 }
 
+interface PageProps {
+    flash: {
+        success?: string;
+        error?: string;
+        status?: string;
+    };
+}
+
 export default function Login({ status }: LoginProps) {
+    const { flash } = usePage<PageProps>().props;
+    
     return (
         <AuthLayout title="Log in to your account" description="Enter your username and password below to log in">
             <Head title="Log in" />
+            
+            {/* Flash Messages */}
+            {flash.error && (
+                <div className="mb-4 p-4 text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg">
+                    {flash.error}
+                </div>
+            )}
+            {flash.success && (
+                <div className="mb-4 p-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg">
+                    {flash.success}
+                </div>
+            )}
 
             <Form {...AuthenticatedSessionController.store.form()} resetOnSuccess={['password']} className="flex flex-col gap-6">
                 {({ processing, errors }) => (

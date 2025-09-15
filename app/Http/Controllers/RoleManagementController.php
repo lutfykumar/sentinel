@@ -176,6 +176,7 @@ class RoleManagementController extends Controller
             'dashboard.view' => 'View Dashboard',
             'data.view' => 'View Customs Data',
             'data.export' => 'Export Customs Data',
+            'company.view' => 'View Company Data',
             'rulesets.view' => 'View Rule Sets',
             'rulesets.create' => 'Create Rule Sets',
             'rulesets.update' => 'Update Rule Sets',

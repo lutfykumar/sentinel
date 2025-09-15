@@ -36,11 +36,22 @@ export default defineConfig({
         chunkSizeWarningLimit: 2000,
         rollupOptions: {
             output: {
-                manualChunks: {
+                manualChunks: (id) => {
+                    // Don't manually chunk page components
+                    if (id.includes('/pages/') && id.includes('.tsx')) {
+                        return undefined;
+                    }
                     // Split large dependencies into separate chunks
-                    'country-data': ['./resources/js/utils/countryMapping.ts'],
-                    'charts': ['recharts'],
-                    'ui': ['lucide-react'],
+                    if (id.includes('countryMapping.ts')) {
+                        return 'country-data';
+                    }
+                    if (id.includes('recharts')) {
+                        return 'charts';
+                    }
+                    if (id.includes('lucide-react')) {
+                        return 'ui';
+                    }
+                    return undefined;
                 },
             },
         },

@@ -48,6 +48,16 @@ class LoginRequest extends FormRequest
             ]);
         }
 
+        // Check if the authenticated user is active
+        $user = Auth::user();
+        if (!$user->isActive()) {
+            Auth::logout(); // Logout the user immediately
+            
+            throw ValidationException::withMessages([
+                'username' => 'Your account is inactive. Please contact an administrator.',
+            ]);
+        }
+
         RateLimiter::clear($this->throttleKey());
     }
 

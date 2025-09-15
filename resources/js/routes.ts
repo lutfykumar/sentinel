@@ -5,6 +5,7 @@
 export const dashboard = () => '/dashboard';
 export const home = () => '/';
 export const data = () => '/data';
+export const company = () => '/company';
 export const dataRuleSets = () => '/rulesets';
 
 // Management routes

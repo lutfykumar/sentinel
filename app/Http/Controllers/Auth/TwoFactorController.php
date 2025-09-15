@@ -147,7 +147,19 @@ class TwoFactorController extends Controller
         
         $user = \App\Models\User::find($userId);
         
-        if (!$user || !$user->verifyGoogle2faToken($request->token)) {
+        if (!$user) {
+            session()->forget(['2fa_user_id', '2fa_remember']);
+            return redirect()->route('login');
+        }
+        
+        // Check if user is active before completing 2FA
+        if (!$user->isActive()) {
+            session()->forget(['2fa_user_id', '2fa_remember']);
+            return redirect()->route('login')
+                ->with('error', 'Your account is inactive. Please contact an administrator.');
+        }
+        
+        if (!$user->verifyGoogle2faToken($request->token)) {
             return back()->withErrors([
                 'token' => 'The provided token is invalid.'
             ]);

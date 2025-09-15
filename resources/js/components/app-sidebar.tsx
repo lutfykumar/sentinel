@@ -2,10 +2,10 @@ import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';
 import { NavUser } from '@/components/nav-user';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar';
-import { dashboard, data, dataRuleSets, managementUsers, managementRoles } from '@/routes';
+import { dashboard, data, company, dataRuleSets, managementUsers, managementRoles } from '@/routes';
 import { type NavItem, type NavGroup } from '@/types';
 import { Link } from '@inertiajs/react';
-import { LayoutGrid, Database, Users, Shield, Settings } from 'lucide-react';
+import { LayoutGrid, Database, Building2, Users, Shield, Settings } from 'lucide-react';
 import AppLogo from './app-logo';
 import useAuth from '@/hooks/useAuth';
 
@@ -35,6 +35,15 @@ export function AppSidebar() {
             title: 'Rule Sets',
             href: dataRuleSets(),
             icon: Settings,
+        });
+    }
+    
+    // Add Company section if user has permission
+    if (hasPermission('company.view')) {
+        platformNavItems.push({
+            title: 'Company',
+            href: company(),
+            icon: Building2,
         });
     }
     
